@@ -770,7 +770,13 @@ class EditorViewModel: ObservableObject {
                     data = try EditorLoadHelper.streamFileData(from: url) { previewData in
                         let previewRaw = String(decoding: previewData, as: UTF8.self)
                         let preview = EditorLoadHelper.sanitizeTextForFileLoad(previewRaw, useFastPath: true)
-                        await self.applyStreamingPreview(tabID: tabID, preview: preview)
+                        // Defer preview updates to avoid view update cycles
+                        DispatchQueue.main.async { [weak self] in
+                            guard let self = self else { return }
+                            Task { @MainActor in
+                                await self.applyStreamingPreview(tabID: tabID, preview: preview)
+                            }
+                        }
                     }
                 } else {
                     data = try Data(contentsOf: url, options: [.mappedIfSafe])
@@ -791,15 +797,21 @@ class EditorViewModel: ObservableObject {
                     ? nil
                     : Self.contentFingerprintValue(content)
                 AppLogger.shared.info("Applying loaded content for: \(url.lastPathComponent)", category: "Editor")
-                await self.applyLoadedContent(
-                    tabID: tabID,
-                    content: content,
-                    language: detectedLang,
-                    languageLocked: extLangHint != nil,
-                    fingerprint: fingerprint,
-                    isLargeCandidate: data.count >= EditorLoadHelper.largeFileCandidateByteThreshold
-                )
-                AppLogger.shared.info("Content applied successfully for: \(url.lastPathComponent)", category: "Editor")
+                // Use DispatchQueue to defer updates outside of potential view update cycles
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    Task { @MainActor in
+                        await self.applyLoadedContent(
+                            tabID: tabID,
+                            content: content,
+                            language: detectedLang,
+                            languageLocked: extLangHint != nil,
+                            fingerprint: fingerprint,
+                            isLargeCandidate: data.count >= EditorLoadHelper.largeFileCandidateByteThreshold
+                        )
+                        AppLogger.shared.info("Content applied successfully for: \(url.lastPathComponent)", category: "Editor")
+                    }
+                }
             } catch {
                 AppLogger.shared.error("Failed to read file: \(url.lastPathComponent) - \(error.localizedDescription)", category: "Editor")
                 await MainActor.run {
@@ -845,6 +857,7 @@ class EditorViewModel: ObservableObject {
     ) async {
         guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
 
+        // Batch property updates to avoid triggering multiple SwiftUI updates
         tabs[index].language = language
         tabs[index].languageLocked = languageLocked
         tabs[index].isDirty = false
