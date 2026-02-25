@@ -1632,7 +1632,7 @@ final class AcceptingTextView: NSTextView {
 }
 
 // NSViewRepresentable wrapper around NSTextView to integrate with SwiftUI.
-struct CustomTextEditor: NSViewRepresentable {
+struct CustomTextEditor: NSViewRepresentable, Equatable {
     @Binding var text: String
     let language: String
     let colorScheme: ColorScheme
@@ -1653,6 +1653,32 @@ struct CustomTextEditor: NSViewRepresentable {
     let autoCloseBracketsEnabled: Bool
     let highlightRefreshToken: Int
     let isTabLoadingContent: Bool
+    
+    // Equatable conformance to prevent unnecessary updateNSView calls
+    static func == (lhs: CustomTextEditor, rhs: CustomTextEditor) -> Bool {
+        // Compare all properties that affect rendering
+        // Note: We compare binding values, not the bindings themselves
+        return lhs.text == rhs.text &&
+               lhs.language == rhs.language &&
+               lhs.colorScheme == rhs.colorScheme &&
+               lhs.fontSize == rhs.fontSize &&
+               lhs.isLineWrapEnabled == rhs.isLineWrapEnabled &&
+               lhs.isLargeFileMode == rhs.isLargeFileMode &&
+               lhs.translucentBackgroundEnabled == rhs.translucentBackgroundEnabled &&
+               lhs.showKeyboardAccessoryBar == rhs.showKeyboardAccessoryBar &&
+               lhs.showLineNumbers == rhs.showLineNumbers &&
+               lhs.showInvisibleCharacters == rhs.showInvisibleCharacters &&
+               lhs.highlightCurrentLine == rhs.highlightCurrentLine &&
+               lhs.highlightMatchingBrackets == rhs.highlightMatchingBrackets &&
+               lhs.showScopeGuides == rhs.showScopeGuides &&
+               lhs.highlightScopeBackground == rhs.highlightScopeBackground &&
+               lhs.indentStyle == rhs.indentStyle &&
+               lhs.indentWidth == rhs.indentWidth &&
+               lhs.autoIndentEnabled == rhs.autoIndentEnabled &&
+               lhs.autoCloseBracketsEnabled == rhs.autoCloseBracketsEnabled &&
+               lhs.highlightRefreshToken == rhs.highlightRefreshToken &&
+               lhs.isTabLoadingContent == rhs.isTabLoadingContent
+    }
 
     private var fontName: String {
         UserDefaults.standard.string(forKey: "SettingsEditorFontName") ?? ""
@@ -1774,6 +1800,8 @@ struct CustomTextEditor: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        print("⏱️ [MAKE-NSVIEW] Starting makeNSView for tab")
         // Build scroll view and text view
         let scrollView = NSScrollView()
         scrollView.drawsBackground = false
@@ -1891,6 +1919,11 @@ struct CustomTextEditor: NSViewRepresentable {
         }
 
         context.coordinator.textView = textView
+        
+        let endTime = CFAbsoluteTimeGetCurrent()
+        let duration = (endTime - startTime) * 1000
+        print("⏱️ [MAKE-NSVIEW] Completed in \(String(format: "%.1f", duration))ms - content length: \(text.count) chars")
+        
         return scrollView
     }
 
@@ -1904,29 +1937,16 @@ struct CustomTextEditor: NSViewRepresentable {
 
             // Sanitize and avoid publishing binding during update
             let target = sanitizedForExternalSet(text)
-            print("🔵 [UPDATE-NSVIEW] text.count=\(text.count), target.count=\(target.count), textView.string.count=\(textView.string.count), isTabLoadingContent=\(isTabLoadingContent)")
+            print("🔵 [UPDATE-NSVIEW] [\(language)] text.count=\(text.count), target.count=\(target.count), textView.string.count=\(textView.string.count), isTabLoadingContent=\(isTabLoadingContent)")
             if textView.string != target {
                 let hasFocus = (textView.window?.firstResponder as? NSTextView) === textView
-                let textViewIsEmpty = textView.string.isEmpty
-                let bindingHasContent = !text.isEmpty
-                // Only prefer editor buffer if it has focus, isn't loading, AND either:
-                // - Both are non-empty (user made edits)
-                // - OR textView has content but binding doesn't (edge case)
-                // Don't prefer empty textView over non-empty binding!
-                let shouldPreferEditorBuffer = hasFocus && !isTabLoadingContent && !textViewIsEmpty
-                print("🔵 [UPDATE-NSVIEW] Mismatch detected: hasFocus=\(hasFocus), textViewIsEmpty=\(textViewIsEmpty), bindingHasContent=\(bindingHasContent), shouldPreferEditorBuffer=\(shouldPreferEditorBuffer)")
-                if shouldPreferEditorBuffer {
-                    print("🟢 [UPDATE-NSVIEW] Preferring editor buffer, syncing textView.string (\(textView.string.count) chars) to binding")
-                    context.coordinator.syncBindingTextImmediately(textView.string)
-                } else {
-                    print("🟠 [UPDATE-NSVIEW] Preferring binding, replacing textView with target (\(target.count) chars)")
-                    context.coordinator.cancelPendingBindingSync()
-                    replaceTextPreservingSelectionAndFocus(textView, with: target)
-                    context.coordinator.invalidateHighlightCache()
-                    // NOTE: Removed DispatchQueue.main.async write-back to binding.
-                    // With @Observable, this defensive write-back is unnecessary and causes
-                    // content to be cleared. The binding is the source of truth, not the target.
-                }
+                // When binding != textView, ALWAYS prefer the binding (source of truth)
+                // updateNSView is for updating the VIEW from the MODEL, not the other way around
+                // User edits flow through textDidChange -> coordinator.syncBindingText
+                print("🟠 [UPDATE-NSVIEW] [\(language)] Binding content differs from textView, updating textView from binding (\(target.count) chars)")
+                context.coordinator.cancelPendingBindingSync()
+                replaceTextPreservingSelectionAndFocus(textView, with: target)
+                context.coordinator.invalidateHighlightCache()
             }
 
             let targetFont = resolvedFont()

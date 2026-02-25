@@ -95,6 +95,15 @@ extension String {
 #endif
 }
 
+///MARK: - Preference Keys
+// PreferenceKey to pass content width from ScrollView content to parent
+private struct TabBarContentWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 ///MARK: - Root View
 //Manages the editor area, toolbar, popovers, and bridges to the view model for file I/O and metrics.
 struct ContentView: View {
@@ -265,6 +274,7 @@ struct ContentView: View {
     @State private var whitespaceInspectorMessage: String? = nil
     @State private var didApplyStartupBehavior: Bool = false
     @State private var didRunInitialWindowLayoutSetup: Bool = false
+    @State private var tabBarContentWidth: CGFloat = 0
 
 #if USE_FOUNDATION_MODELS && canImport(FoundationModels)
     var appleModelAvailable: Bool { true }
@@ -2960,7 +2970,8 @@ struct ContentView: View {
                     highlightRefreshToken: highlightRefreshToken,
                     isTabLoadingContent: viewModel.selectedTab?.isLoadingContent ?? false
                 )
-                .id(currentLanguage)
+                .equatable()
+                .id(viewModel.selectedTabID)
                 .frame(maxWidth: brainDumpLayoutEnabled ? 920 : .infinity)
                 .frame(maxHeight: .infinity)
                 .padding(.horizontal, brainDumpLayoutEnabled ? 24 : 0)
@@ -3683,7 +3694,12 @@ struct ContentView: View {
                                 ForEach(viewModel.tabs) { tab in
                                     HStack(spacing: 8) {
                                         Button {
+                                            let startTime = CFAbsoluteTimeGetCurrent()
+                                            print("🔵 [TAB-CLICK] Tab clicked: \(tab.name), setting selectedTabID to \(tab.id)")
                                             viewModel.selectedTabID = tab.id
+                                            let endTime = CFAbsoluteTimeGetCurrent()
+                                            let duration = (endTime - startTime) * 1000
+                                            print("🔵 [TAB-CLICK] selectedTabID set in \(String(format: "%.1f", duration))ms, now: \(String(describing: viewModel.selectedTabID))")
                                         } label: {
                                             Text(tab.name + (tab.isDirty ? " •" : ""))
                                                 .lineLimit(1)
@@ -3724,6 +3740,9 @@ struct ContentView: View {
                             }
                         )
                     }
+                    .onPreferenceChange(TabBarContentWidthKey.self) { contentWidth in
+                        tabBarContentWidth = contentWidth
+                    }
                     .onChange(of: viewModel.selectedTabID) { _, newTabID in
                         if let newTabID {
                             withAnimation(.easeInOut(duration: 0.2)) {
@@ -3731,26 +3750,36 @@ struct ContentView: View {
                             }
                         }
                     }
-                }
-                .onPreferenceChange(TabBarContentWidthKey.self) { contentWidth in
-                    let needsFade = contentWidth > geometry.size.width
-                    if needsFade {
-                        // Apply gradient mask only when content overflows
-                    }
-                }
-                .overlay(alignment: .leading) {
-                    if shouldShowTabBarFade(contentWidth: tabBarContentWidth, viewWidth: geometry.size.width) {
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                Color.black.opacity(0),
-                                Color.black.opacity(0)
-                            ]),
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: 20)
-                        .allowsHitTesting(false)
-                        .blendMode(.destinationOut)
+                    .mask {
+                        if tabBarContentWidth > geometry.size.width {
+                            HStack(spacing: 0) {
+                                LinearGradient(
+                                    gradient: Gradient(stops: [
+                                        .init(color: .clear, location: 0.0),
+                                        .init(color: .white, location: 1.0)
+                                    ]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                                .frame(width: 40)
+                                
+                                Rectangle()
+                                    .fill(Color.white)
+                                
+                                LinearGradient(
+                                    gradient: Gradient(stops: [
+                                        .init(color: .white, location: 0.0),
+                                        .init(color: .clear, location: 1.0)
+                                    ]),
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                                .frame(width: 40)
+                            }
+                        } else {
+                            Rectangle()
+                                .fill(Color.white)
+                        }
                     }
                 }
             }
