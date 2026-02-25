@@ -756,14 +756,23 @@ class EditorViewModel: ObservableObject {
             isLoadingContent: true,
             isLargeFileCandidate: isLargeCandidate
         )
-        print("🟡 [TRACE] About to append placeholder tab - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
-        tabs.append(placeholderTab)
-        print("🟢 [TRACE] Placeholder tab appended - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
-        selectedTabID = placeholderTab.id
-        print("🟢 [TRACE] selectedTabID set - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
+        
+        print("🟡 [TRACE] About to DEFER placeholder tab creation via DispatchQueue - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
+        
+        // CRITICAL FIX: Defer tab creation to avoid modifying @Published during view updates
+        // If openFile() is called from a menu action during SwiftUI rendering, direct
+        // modification of tabs/selectedTabID creates AttributeGraph cycles.
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            print("🟡 [TRACE] DispatchQueue executing placeholder tab creation - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
+            self.tabs.append(placeholderTab)
+            print("🟢 [TRACE] Placeholder tab appended - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
+            self.selectedTabID = placeholderTab.id
+            print("🟢 [TRACE] selectedTabID set - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
+        }
         AppLogger.shared.info("Placeholder tab created, launching file read task for: \(url.lastPathComponent)", category: "Editor")
 
-        let tabID = placeholderTab.id
+        let tabID = placeholderTab.id  // Capture ID before async operations
         // Capture security-scoped access state to maintain it in detached task
         Task.detached(priority: .userInitiated) { [url, extLangHint, tabID, isLargeCandidate, didStartScopedAccess] in
             AppLogger.shared.info("Detached task started for reading: \(url.lastPathComponent)", category: "Editor")
