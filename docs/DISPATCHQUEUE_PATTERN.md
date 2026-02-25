@@ -143,7 +143,7 @@ Task.detached(priority: .userInitiated) {
 - No cycles, no crashes ✓
 - Maintains actor isolation ✓
 
-## The Two Critical Locations
+## The Three Critical Locations
 
 ### Location 1: Initial Tab Creation (PRIMARY FIX)
 
@@ -179,6 +179,36 @@ DispatchQueue.main.async { [weak self] in
 ```
 
 **Why it matters:** Prevents cycles if user interacts with UI while file loads.
+
+### Location 3: Tab Content Updates (CRITICAL FIX)
+
+**File:** `EditorViewModel.swift`
+**Method:** `updateTabContent(tab:content:)`
+**Issue:** Direct synchronous modification of `tabs[index].content`, `tabs[index].isDirty`, and language properties
+
+**Called from:**
+- Text editor bindings (user typing in ContentView)
+- Menu actions (AI suggestions in AppMenus)
+- Language change callbacks (template insertion in ContentView)
+
+```swift
+// Line ~461 - Wrap entire method in DispatchQueue.main.async
+func updateTabContent(tab: TabData, content: String) {
+    DispatchQueue.main.async { [weak self] in
+        guard let self = self else { return }
+
+        if let index = self.tabs.firstIndex(where: { $0.id == tab.id }) {
+            // All @Published property modifications now deferred
+            self.tabs[index].content = content
+            self.tabs[index].isDirty = true
+            self.tabs[index].language = detected
+            // ... etc
+        }
+    }
+}
+```
+
+**Why it matters:** This method is called from text editor bindings during SwiftUI's view update cycle. When the user types, the binding's `set` closure executes during rendering. Without the DispatchQueue wrapper, this causes "Publishing changes from within view updates" errors. The ~16ms delay (one frame) is imperceptible but prevents AttributeGraph cycles.
 
 ## When to Use This Pattern
 
