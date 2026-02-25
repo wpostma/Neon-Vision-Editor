@@ -459,136 +459,143 @@ class EditorViewModel: ObservableObject {
 
     // Updates tab text and applies language detection/locking heuristics.
     func updateTabContent(tab: TabData, content: String) {
-        if let index = tabs.firstIndex(where: { $0.id == tab.id }) {
-            if tabs[index].isLoadingContent {
-                // During staged file load, content updates are system-driven; do not mark dirty
-                // and do not run language detection on partial content.
-                tabs[index].content = content
-                return
-            }
-            let previousLength = tabs[index].contentUTF16Length
-            let newLength = (content as NSString).length
-            if previousLength == newLength, newLength <= 200_000 {
-                // Avoid re-running language detection and view updates when the text is unchanged.
-                if tabs[index].content == content {
+        // Defer all @Published property modifications to avoid "Publishing changes from within view updates"
+        // This is critical when called from menu actions, text editor bindings, or other UI callbacks
+        // that may execute during SwiftUI's rendering cycle.
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            if let index = self.tabs.firstIndex(where: { $0.id == tab.id }) {
+                if self.tabs[index].isLoadingContent {
+                    // During staged file load, content updates are system-driven; do not mark dirty
+                    // and do not run language detection on partial content.
+                    self.tabs[index].content = content
                     return
                 }
-            }
-            tabs[index].content = content
-            if !tabs[index].isDirty {
-                tabs[index].isDirty = true
-            }
-
-            let isLargeContent = (content as NSString).length >= 1_000_000
-            if isLargeContent {
-                let nameExt = URL(fileURLWithPath: tabs[index].name).pathExtension.lowercased()
-                if !tabs[index].languageLocked,
-                   let mapped = LanguageDetector.shared.preferredLanguage(for: tabs[index].fileURL) ??
-                                languageMap[nameExt] {
-                    tabs[index].language = mapped
-                }
-                return
-            }
-            
-            // Early lock to Swift if clearly Swift-specific tokens are present
-            let lower = content.lowercased()
-            let swiftStrongTokens: Bool = (
-                lower.contains(" import swiftui") ||
-                lower.hasPrefix("import swiftui") ||
-                lower.contains("@main") ||
-                lower.contains(" final class ") ||
-                lower.contains("public final class ") ||
-                lower.contains(": view") ||
-                lower.contains("@published") ||
-                lower.contains("@stateobject") ||
-                lower.contains("@mainactor") ||
-                lower.contains("protocol ") ||
-                lower.contains("extension ") ||
-                lower.contains("import appkit") ||
-                lower.contains("import uikit") ||
-                lower.contains("import foundationmodels") ||
-                lower.contains("guard ") ||
-                lower.contains("if let ")
-            )
-            if swiftStrongTokens {
-                tabs[index].language = "swift"
-                tabs[index].languageLocked = true
-                return
-            }
-            
-            if !tabs[index].languageLocked {
-                // If the tab name has a known extension, honor it and lock
-                let nameExt = URL(fileURLWithPath: tabs[index].name).pathExtension.lowercased()
-                if let extLang = languageMap[nameExt], !extLang.isEmpty {
-                    // If the extension suggests C# but content looks like Swift, prefer Swift and do not lock.
-                    if extLang == "csharp" {
-                        let looksSwift = lower.contains("import swiftui") || lower.contains(": view") || lower.contains("@main") || lower.contains(" final class ")
-                        if looksSwift {
-                            tabs[index].language = "swift"
-                            tabs[index].languageLocked = true
-                        } else {
-                            tabs[index].language = extLang
-                            tabs[index].languageLocked = true
-                        }
-                    } else {
-                        tabs[index].language = extLang
-                        tabs[index].languageLocked = true
+                let previousLength = self.tabs[index].contentUTF16Length
+                let newLength = (content as NSString).length
+                if previousLength == newLength, newLength <= 200_000 {
+                    // Avoid re-running language detection and view updates when the text is unchanged.
+                    if self.tabs[index].content == content {
+                        return
                     }
-                } else {
-                    let result = LanguageDetector.shared.detect(text: content, name: tabs[index].name, fileURL: tabs[index].fileURL)
-                    let detected = result.lang
-                    let scores = result.scores
-                    let current = tabs[index].language
-                    let swiftScore = scores["swift"] ?? 0
-                    let csharpScore = scores["csharp"] ?? 0
+                }
+                self.tabs[index].content = content
+                if !self.tabs[index].isDirty {
+                    self.tabs[index].isDirty = true
+                }
 
-                    // Derive strong Swift tokens and C# context similar to the detector to control switching behavior
-                    // (let lower = content.lowercased()) -- removed duplicate since defined above
-                    let swiftStrongTokens: Bool = (
-                        lower.contains(" final class ") ||
-                        lower.contains("public final class ") ||
-                        lower.contains(": view") ||
-                        lower.contains("@published") ||
-                        lower.contains("@stateobject") ||
-                        lower.contains("@mainactor") ||
-                        lower.contains("protocol ") ||
-                        lower.contains("extension ") ||
-                        lower.contains("import swiftui") ||
-                        lower.contains("import appkit") ||
-                        lower.contains("import uikit") ||
-                        lower.contains("import foundationmodels") ||
-                        lower.contains("guard ") ||
-                        lower.contains("if let ")
-                    )
-
-                    let hasUsingSystem = lower.contains("\nusing system;") || lower.contains("\nusing system.")
-                    let hasNamespace = lower.contains("\nnamespace ")
-                    let hasMainMethod = lower.contains("static void main(") || lower.contains("static int main(")
-                    let hasCSharpAttributes = (lower.contains("\n[") && lower.contains("]\n") && !lower.contains("@"))
-                    let csharpContext = hasUsingSystem || hasNamespace || hasMainMethod || hasCSharpAttributes
-
-                    // Avoid switching from Swift to C# unless there is very strong C# evidence and margin
-                    if current == "swift" && detected == "csharp" {
-                        let requireMargin = 25
-                        if swiftStrongTokens && !csharpContext {
-                            // Keep Swift when Swift-only tokens are present and no C# context exists
-                        } else if !(csharpContext && csharpScore >= swiftScore + requireMargin) {
-                            // Not enough evidence to switch away from Swift
+                let isLargeContent = (content as NSString).length >= 1_000_000
+                if isLargeContent {
+                    let nameExt = URL(fileURLWithPath: self.tabs[index].name).pathExtension.lowercased()
+                    if !self.tabs[index].languageLocked,
+                       let mapped = LanguageDetector.shared.preferredLanguage(for: self.tabs[index].fileURL) ??
+                                    self.languageMap[nameExt] {
+                        self.tabs[index].language = mapped
+                    }
+                    return
+                }
+                
+                // Early lock to Swift if clearly Swift-specific tokens are present
+                let lower = content.lowercased()
+                let swiftStrongTokens: Bool = (
+                    lower.contains(" import swiftui") ||
+                    lower.hasPrefix("import swiftui") ||
+                    lower.contains("@main") ||
+                    lower.contains(" final class ") ||
+                    lower.contains("public final class ") ||
+                    lower.contains(": view") ||
+                    lower.contains("@published") ||
+                    lower.contains("@stateobject") ||
+                    lower.contains("@mainactor") ||
+                    lower.contains("protocol ") ||
+                    lower.contains("extension ") ||
+                    lower.contains("import appkit") ||
+                    lower.contains("import uikit") ||
+                    lower.contains("import foundationmodels") ||
+                    lower.contains("guard ") ||
+                    lower.contains("if let ")
+                )
+                if swiftStrongTokens {
+                    self.tabs[index].language = "swift"
+                    self.tabs[index].languageLocked = true
+                    return
+                }
+                
+                if !self.tabs[index].languageLocked {
+                    // If the tab name has a known extension, honor it and lock
+                    let nameExt = URL(fileURLWithPath: self.tabs[index].name).pathExtension.lowercased()
+                    if let extLang = self.languageMap[nameExt], !extLang.isEmpty {
+                        // If the extension suggests C# but content looks like Swift, prefer Swift and do not lock.
+                        if extLang == "csharp" {
+                            let looksSwift = lower.contains("import swiftui") || lower.contains(": view") || lower.contains("@main") || lower.contains(" final class ")
+                            if looksSwift {
+                                self.tabs[index].language = "swift"
+                                self.tabs[index].languageLocked = true
+                            } else {
+                                self.tabs[index].language = extLang
+                                self.tabs[index].languageLocked = true
+                            }
                         } else {
-                            tabs[index].language = "csharp"
-                            tabs[index].languageLocked = false
+                            self.tabs[index].language = extLang
+                            self.tabs[index].languageLocked = true
                         }
                     } else {
-                        // Never downgrade an already-detected language to plain while editing.
-                        // This avoids syntax-highlight flicker when detector confidence drops temporarily.
-                        if detected == "plain" && current != "plain" {
-                            return
-                        }
-                        // For all other cases, accept the detection
-                        tabs[index].language = detected
-                        // If Swift is confidently detected or Swift-only tokens are present, lock to prevent flip-flops
-                        if detected == "swift" && (result.confidence >= 5 || swiftStrongTokens) {
-                            tabs[index].languageLocked = true
+                        let result = LanguageDetector.shared.detect(text: content, name: self.tabs[index].name, fileURL: self.tabs[index].fileURL)
+                        let detected = result.lang
+                        let scores = result.scores
+                        let current = self.tabs[index].language
+                        let swiftScore = scores["swift"] ?? 0
+                        let csharpScore = scores["csharp"] ?? 0
+
+                        // Derive strong Swift tokens and C# context similar to the detector to control switching behavior
+                        // (let lower = content.lowercased()) -- removed duplicate since defined above
+                        let swiftStrongTokens: Bool = (
+                            lower.contains(" final class ") ||
+                            lower.contains("public final class ") ||
+                            lower.contains(": view") ||
+                            lower.contains("@published") ||
+                            lower.contains("@stateobject") ||
+                            lower.contains("@mainactor") ||
+                            lower.contains("protocol ") ||
+                            lower.contains("extension ") ||
+                            lower.contains("import swiftui") ||
+                            lower.contains("import appkit") ||
+                            lower.contains("import uikit") ||
+                            lower.contains("import foundationmodels") ||
+                            lower.contains("guard ") ||
+                            lower.contains("if let ")
+                        )
+
+                        let hasUsingSystem = lower.contains("\nusing system;") || lower.contains("\nusing system.")
+                        let hasNamespace = lower.contains("\nnamespace ")
+                        let hasMainMethod = lower.contains("static void main(") || lower.contains("static int main(")
+                        let hasCSharpAttributes = (lower.contains("\n[") && lower.contains("]\n") && !lower.contains("@"))
+                        let csharpContext = hasUsingSystem || hasNamespace || hasMainMethod || hasCSharpAttributes
+
+                        // Avoid switching from Swift to C# unless there is very strong C# evidence and margin
+                        if current == "swift" && detected == "csharp" {
+                            let requireMargin = 25
+                            if swiftStrongTokens && !csharpContext {
+                                // Keep Swift when Swift-only tokens are present and no C# context exists
+                            } else if !(csharpContext && csharpScore >= swiftScore + requireMargin) {
+                                // Not enough evidence to switch away from Swift
+                            } else {
+                                self.tabs[index].language = "csharp"
+                                self.tabs[index].languageLocked = false
+                            }
+                        } else {
+                            // Never downgrade an already-detected language to plain while editing.
+                            // This avoids syntax-highlight flicker when detector confidence drops temporarily.
+                            if detected == "plain" && current != "plain" {
+                                return
+                            }
+                            // For all other cases, accept the detection
+                            self.tabs[index].language = detected
+                            // If Swift is confidently detected or Swift-only tokens are present, lock to prevent flip-flops
+                            if detected == "swift" && (result.confidence >= 5 || swiftStrongTokens) {
+                                self.tabs[index].languageLocked = true
+                            }
                         }
                     }
                 }
@@ -773,8 +780,9 @@ class EditorViewModel: ObservableObject {
         AppLogger.shared.info("Placeholder tab created, launching file read task for: \(url.lastPathComponent)", category: "Editor")
 
         let tabID = placeholderTab.id  // Capture ID before async operations
+        let startTime = Date()  // Track load time
         // Capture security-scoped access state to maintain it in detached task
-        Task.detached(priority: .userInitiated) { [url, extLangHint, tabID, isLargeCandidate, didStartScopedAccess] in
+        Task.detached(priority: .userInitiated) { [url, extLangHint, tabID, isLargeCandidate, didStartScopedAccess, startTime] in
             AppLogger.shared.info("Detached task started for reading: \(url.lastPathComponent)", category: "Editor")
             // Maintain security-scoped access for the duration of file loading
             defer {
@@ -818,10 +826,13 @@ class EditorViewModel: ObservableObject {
                 let fingerprint: UInt64? = data.count >= EditorLoadHelper.skipFingerprintByteThreshold
                     ? nil
                     : Self.contentFingerprintValue(content)
-                AppLogger.shared.info("Applying loaded content for: \(url.lastPathComponent)", category: "Editor")
+                
+                let lineCount = content.components(separatedBy: .newlines).count
+                let formattedSize = ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)
+                AppLogger.shared.info("Applying loaded content for: \(url.lastPathComponent) - \(lineCount) lines, \(formattedSize)", category: "Editor")
                 print("⚪️ [TRACE] About to schedule DispatchQueue.main.async for applyLoadedContent")
                 // Use DispatchQueue to defer updates outside of potential view update cycles
-                DispatchQueue.main.async { [weak self] in
+                DispatchQueue.main.async { [weak self, startTime] in
                     print("⚪️ [TRACE] DispatchQueue.main.async EXECUTING for applyLoadedContent - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
                     guard let self = self else { return }
                     Task { @MainActor in
@@ -832,9 +843,10 @@ class EditorViewModel: ObservableObject {
                             language: detectedLang,
                             languageLocked: extLangHint != nil,
                             fingerprint: fingerprint,
-                            isLargeCandidate: data.count >= EditorLoadHelper.largeFileCandidateByteThreshold
+                            isLargeCandidate: data.count >= EditorLoadHelper.largeFileCandidateByteThreshold,
+                            startTime: startTime
                         )
-                        AppLogger.shared.info("Content applied successfully for: \(url.lastPathComponent)", category: "Editor")
+                        // Success logged in applyLoadedContent with file statistics
                     }
                 }
             } catch {
@@ -878,7 +890,8 @@ class EditorViewModel: ObservableObject {
         language: String,
         languageLocked: Bool,
         fingerprint: UInt64?,
-        isLargeCandidate: Bool
+        isLargeCandidate: Bool,
+        startTime: Date
     ) async {
         print("🔴 [TRACE] applyLoadedContent() ENTERED - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
         guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { 
@@ -944,7 +957,15 @@ class EditorViewModel: ObservableObject {
         
         print("🔴 [TRACE] applyLoadedContent() - Setting isLoadingContent = false")
         tabs[index].isLoadingContent = false
-        print("🔴 [TRACE] applyLoadedContent() - COMPLETED")
+        
+        // Log file statistics with timing
+        let elapsed = Date().timeIntervalSince(startTime)
+        let lineCount = content.components(separatedBy: .newlines).count
+        let fileSize = content.utf8.count
+        let formattedSize = ByteCountFormatter.string(fromByteCount: Int64(fileSize), countStyle: .file)
+        let timeFormatted = String(format: "%.3f", elapsed)
+        print("✅ [TRACE] applyLoadedContent() - COMPLETED: \(lineCount) lines, \(formattedSize) in \(timeFormatted)s")
+        AppLogger.shared.info("Loaded file: \(lineCount) lines, \(formattedSize) in \(timeFormatted)s", category: "Editor")
     }
 
     @MainActor
