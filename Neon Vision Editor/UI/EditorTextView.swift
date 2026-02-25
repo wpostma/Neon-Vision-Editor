@@ -2913,7 +2913,7 @@ final class LineNumberedTextViewContainer: UIView {
     }
 }
 
-struct CustomTextEditor: UIViewRepresentable {
+struct CustomTextEditor: UIViewRepresentable, Equatable {
     @Binding var text: String
     let language: String
     let colorScheme: ColorScheme
@@ -2934,6 +2934,31 @@ struct CustomTextEditor: UIViewRepresentable {
     let autoCloseBracketsEnabled: Bool
     let highlightRefreshToken: Int
     let isTabLoadingContent: Bool
+    
+    // Equatable conformance to prevent unnecessary updateUIView calls
+    static func == (lhs: CustomTextEditor, rhs: CustomTextEditor) -> Bool {
+        // Compare all properties that affect rendering
+        return lhs.text == rhs.text &&
+               lhs.language == rhs.language &&
+               lhs.colorScheme == rhs.colorScheme &&
+               lhs.fontSize == rhs.fontSize &&
+               lhs.isLineWrapEnabled == rhs.isLineWrapEnabled &&
+               lhs.isLargeFileMode == rhs.isLargeFileMode &&
+               lhs.translucentBackgroundEnabled == rhs.translucentBackgroundEnabled &&
+               lhs.showKeyboardAccessoryBar == rhs.showKeyboardAccessoryBar &&
+               lhs.showLineNumbers == rhs.showLineNumbers &&
+               lhs.showInvisibleCharacters == rhs.showInvisibleCharacters &&
+               lhs.highlightCurrentLine == rhs.highlightCurrentLine &&
+               lhs.highlightMatchingBrackets == rhs.highlightMatchingBrackets &&
+               lhs.showScopeGuides == rhs.showScopeGuides &&
+               lhs.highlightScopeBackground == rhs.highlightScopeBackground &&
+               lhs.indentStyle == rhs.indentStyle &&
+               lhs.indentWidth == rhs.indentWidth &&
+               lhs.autoIndentEnabled == rhs.autoIndentEnabled &&
+               lhs.autoCloseBracketsEnabled == rhs.autoCloseBracketsEnabled &&
+               lhs.highlightRefreshToken == rhs.highlightRefreshToken &&
+               lhs.isTabLoadingContent == rhs.isTabLoadingContent
+    }
 
     private var fontName: String {
         UserDefaults.standard.string(forKey: "SettingsEditorFontName") ?? ""

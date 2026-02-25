@@ -403,7 +403,7 @@ struct NeonVisionEditorApp: App {
     private var iOSScenes: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(viewModel)
+                .environment(viewModel)
                 .environmentObject(supportPurchaseManager)
                 .environmentObject(appUpdateManager)
                 .environment(\.showGrokError, $showGrokError)

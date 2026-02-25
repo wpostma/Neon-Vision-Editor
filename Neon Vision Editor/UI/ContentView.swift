@@ -1784,12 +1784,14 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .dismissWelcomeTourRequested)) { _ in
                 showWelcomeTour = false
             }
+#if os(macOS)
             .onReceive(NotificationCenter.default.publisher(for: .toggleMarkdownPreviewRequested)) { notif in
                 guard matchesCurrentWindow(notif) else { return }
                 if currentLanguage == "markdown" {
                     showMarkdownPreviewPane.toggle()
                 }
             }
+#endif
             .onAppear {
                 // Keep iOS tab/editor layout stable by forcing Brain Dump off on mobile.
 #if os(iOS)
@@ -3059,7 +3061,7 @@ struct ContentView: View {
 #if os(iOS)
         let contentWithTopChrome = useIPhoneUnifiedTopHost
             ? AnyView(
-                content.safeAreaInset(edge: .top, spacing: 0) {
+                content.safeAreaInset(edge: .top) {
                     iPhoneUnifiedTopChromeHost
                 }
             )
