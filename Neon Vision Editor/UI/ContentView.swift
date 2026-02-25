@@ -2015,19 +2015,25 @@ struct ContentView: View {
             let selectedURL = restoredLastSessionSelectedFileURL()
 
             if !urls.isEmpty {
-                viewModel.tabs.removeAll()
-                viewModel.selectedTabID = nil
+                // Delay file restoration to allow security-scoped bookmarks to be fully resolved
+                // and app initialization to complete. This prevents permission errors at startup.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak viewModel] in
+                    guard let viewModel = viewModel else { return }
 
-                for url in urls {
-                    viewModel.openFile(url: url)
-                }
+                    viewModel.tabs.removeAll()
+                    viewModel.selectedTabID = nil
 
-                if let selectedURL {
-                    _ = viewModel.focusTabIfOpen(for: selectedURL)
-                }
+                    for url in urls {
+                        viewModel.openFile(url: url)
+                    }
 
-                if viewModel.tabs.isEmpty {
-                    viewModel.addNewTab()
+                    if let selectedURL {
+                        _ = viewModel.focusTabIfOpen(for: selectedURL)
+                    }
+
+                    if viewModel.tabs.isEmpty {
+                        viewModel.addNewTab()
+                    }
                 }
             }
         }

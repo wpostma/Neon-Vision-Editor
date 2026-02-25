@@ -437,15 +437,27 @@ class EditorViewModel: ObservableObject {
         "bash": "bash",
         "zsh": "zsh"
     ]
-    
+
     init() {
-        addNewTab()
+        // During init, we're not in a view update cycle, so use immediate version
+        let initialTab = TabData(name: "Untitled 1", content: "", language: defaultNewTabLanguage(), fileURL: nil, languageLocked: false)
+        addNewTabImmediate(initialTab)
     }
 
     // Creates and selects a new untitled tab.
     func addNewTab() {
         // Keep language discovery active for new untitled tabs.
         let newTab = TabData(name: "Untitled \(tabs.count + 1)", content: "", language: defaultNewTabLanguage(), fileURL: nil, languageLocked: false)
+
+        // Defer @Published modifications to avoid cycles when called from menu/toolbar actions
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.addNewTabImmediate(newTab)
+        }
+    }
+
+    // Internal: Adds a new tab immediately without deferral (for use within already-deferred contexts)
+    private func addNewTabImmediate(_ newTab: TabData) {
         tabs.append(newTab)
         selectedTabID = newTab.id
     }
@@ -613,11 +625,17 @@ class EditorViewModel: ObservableObject {
 
     // Closes a tab while guaranteeing one tab remains open.
     func closeTab(tab: TabData) {
-        tabs.removeAll { $0.id == tab.id }
-        if tabs.isEmpty {
-            addNewTab()
-        } else if selectedTabID == tab.id {
-            selectedTabID = tabs.first?.id
+        // Defer @Published modifications to avoid cycles when called from menu/toolbar actions
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.tabs.removeAll { $0.id == tab.id }
+            if self.tabs.isEmpty {
+                // Use immediate version to avoid double deferral
+                let newTab = TabData(name: "Untitled \(self.tabs.count + 1)", content: "", language: self.defaultNewTabLanguage(), fileURL: nil, languageLocked: false)
+                self.addNewTabImmediate(newTab)
+            } else if self.selectedTabID == tab.id {
+                self.selectedTabID = self.tabs.first?.id
+            }
         }
     }
 
@@ -1003,7 +1021,11 @@ class EditorViewModel: ObservableObject {
     // Focuses an existing tab for URL if present.
     func focusTabIfOpen(for url: URL) -> Bool {
         if let existingIndex = indexOfOpenTab(for: url) {
-            selectedTabID = tabs[existingIndex].id
+            // Defer @Published modifications to avoid cycles when called from menu/toolbar actions
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.selectedTabID = self.tabs[existingIndex].id
+            }
             return true
         }
         return false
