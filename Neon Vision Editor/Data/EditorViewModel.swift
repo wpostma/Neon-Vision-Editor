@@ -697,6 +697,7 @@ class EditorViewModel: ObservableObject {
 
     // Opens file-picker UI on macOS.
     func openFile() {
+        print("🔷 [TRACE] openFile() picker CALLED - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
 #if os(macOS)
         let panel = NSOpenPanel()
         // Allow opening any file type, including hidden dotfiles like .zshrc
@@ -706,11 +707,16 @@ class EditorViewModel: ObservableObject {
         panel.canChooseDirectories = false
         panel.showsHiddenFiles = true
 
+        print("🔷 [TRACE] About to show NSOpenPanel")
         if panel.runModal() == .OK {
             let urls = panel.urls
+            print("🔷 [TRACE] User selected \(urls.count) file(s) from picker")
             for url in urls {
+                print("🔷 [TRACE] Calling openFile(url:) for: \(url.lastPathComponent)")
                 openFile(url: url)
             }
+        } else {
+            print("🔷 [TRACE] User cancelled file picker")
         }
 #else
         // iOS/iPadOS: document picker flow can be added here.
@@ -720,6 +726,7 @@ class EditorViewModel: ObservableObject {
 
     // Loads a file into a new tab unless the file is already open.
     func openFile(url: URL) {
+        print("🔵 [TRACE] openFile() called for: \(url.lastPathComponent) - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
         AppLogger.shared.info("openFile called for: \(url.lastPathComponent)", category: "Editor")
         if focusTabIfOpen(for: url) { 
             AppLogger.shared.info("File already open, focusing tab: \(url.lastPathComponent)", category: "Editor")
@@ -749,8 +756,11 @@ class EditorViewModel: ObservableObject {
             isLoadingContent: true,
             isLargeFileCandidate: isLargeCandidate
         )
+        print("🟡 [TRACE] About to append placeholder tab - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
         tabs.append(placeholderTab)
+        print("🟢 [TRACE] Placeholder tab appended - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
         selectedTabID = placeholderTab.id
+        print("🟢 [TRACE] selectedTabID set - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
         AppLogger.shared.info("Placeholder tab created, launching file read task for: \(url.lastPathComponent)", category: "Editor")
 
         let tabID = placeholderTab.id
@@ -770,10 +780,13 @@ class EditorViewModel: ObservableObject {
                     data = try EditorLoadHelper.streamFileData(from: url) { previewData in
                         let previewRaw = String(decoding: previewData, as: UTF8.self)
                         let preview = EditorLoadHelper.sanitizeTextForFileLoad(previewRaw, useFastPath: true)
+                        print("⬜️ [TRACE] About to schedule DispatchQueue.main.async for applyStreamingPreview")
                         // Defer preview updates to avoid view update cycles
                         DispatchQueue.main.async { [weak self] in
+                            print("⬜️ [TRACE] DispatchQueue.main.async EXECUTING for applyStreamingPreview - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
                             guard let self = self else { return }
                             Task { @MainActor in
+                                print("⬜️ [TRACE] Task @MainActor STARTED for applyStreamingPreview")
                                 await self.applyStreamingPreview(tabID: tabID, preview: preview)
                             }
                         }
@@ -797,10 +810,13 @@ class EditorViewModel: ObservableObject {
                     ? nil
                     : Self.contentFingerprintValue(content)
                 AppLogger.shared.info("Applying loaded content for: \(url.lastPathComponent)", category: "Editor")
+                print("⚪️ [TRACE] About to schedule DispatchQueue.main.async for applyLoadedContent")
                 // Use DispatchQueue to defer updates outside of potential view update cycles
                 DispatchQueue.main.async { [weak self] in
+                    print("⚪️ [TRACE] DispatchQueue.main.async EXECUTING for applyLoadedContent - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
                     guard let self = self else { return }
                     Task { @MainActor in
+                        print("⚪️ [TRACE] Task @MainActor STARTED for applyLoadedContent")
                         await self.applyLoadedContent(
                             tabID: tabID,
                             content: content,
@@ -855,22 +871,31 @@ class EditorViewModel: ObservableObject {
         fingerprint: UInt64?,
         isLargeCandidate: Bool
     ) async {
-        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
+        print("🔴 [TRACE] applyLoadedContent() ENTERED - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { 
+            print("🔴 [TRACE] applyLoadedContent() - Tab not found, exiting")
+            return 
+        }
 
+        print("🔴 [TRACE] applyLoadedContent() - About to modify tabs array properties")
         // Batch property updates to avoid triggering multiple SwiftUI updates
         tabs[index].language = language
         tabs[index].languageLocked = languageLocked
         tabs[index].isDirty = false
         tabs[index].lastSavedFingerprint = fingerprint
         tabs[index].isLargeFileCandidate = isLargeCandidate
+        print("🔴 [TRACE] applyLoadedContent() - Metadata properties set")
         
         // For large files, use chunked assignment to avoid blocking the main thread
         let contentUTF16Count = (content as NSString).length
         if isLargeCandidate && contentUTF16Count > EditorLoadHelper.stagedFirstChunkUTF16Length {
+            print("🟣 [TRACE] applyLoadedContent() - Using CHUNKED loading for large file")
             // Apply first chunk immediately for quick display
             let nsString = content as NSString
             let firstChunk = nsString.substring(to: min(EditorLoadHelper.stagedFirstChunkUTF16Length, contentUTF16Count))
+            print("🟣 [TRACE] applyLoadedContent() - Setting FIRST CHUNK content")
             tabs[index].content = firstChunk
+            print("🟣 [TRACE] applyLoadedContent() - First chunk set, about to yield")
             
             // Yield to let UI render the first chunk
             await Task.yield()
@@ -896,27 +921,44 @@ class EditorViewModel: ObservableObject {
                 await Task.yield()
             }
             
+            print("🟣 [TRACE] applyLoadedContent() - Setting FINAL content for chunked file")
             tabs[index].content = content
+            print("🟣 [TRACE] applyLoadedContent() - Final content set for chunked file")
         } else {
             // Small files: direct assignment
+            print("🟠 [TRACE] applyLoadedContent() - Small file, yielding then setting content")
             await Task.yield()
+            print("🟠 [TRACE] applyLoadedContent() - Setting content for small file")
             tabs[index].content = content
+            print("🟠 [TRACE] applyLoadedContent() - Content set for small file")
         }
         
+        print("🔴 [TRACE] applyLoadedContent() - Setting isLoadingContent = false")
         tabs[index].isLoadingContent = false
+        print("🔴 [TRACE] applyLoadedContent() - COMPLETED")
     }
 
     @MainActor
     private func applyStreamingPreview(tabID: UUID, preview: String) async {
-        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { return }
-        guard tabs[index].isLoadingContent, !tabs[index].isDirty else { return }
+        print("🟦 [TRACE] applyStreamingPreview() ENTERED - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { 
+            print("🟦 [TRACE] applyStreamingPreview() - Tab not found")
+            return 
+        }
+        guard tabs[index].isLoadingContent, !tabs[index].isDirty else { 
+            print("🟦 [TRACE] applyStreamingPreview() - Tab not loading or is dirty")
+            return 
+        }
         
         // Yield to allow UI updates before applying preview content
         await Task.yield()
         
         if tabs[index].content.utf16.count < preview.utf16.count {
+            print("🟦 [TRACE] applyStreamingPreview() - Setting preview content")
             tabs[index].content = preview
+            print("🟦 [TRACE] applyStreamingPreview() - Preview content set")
         }
+        print("🟦 [TRACE] applyStreamingPreview() - COMPLETED")
     }
 
     private func contentFingerprint(_ text: String) -> UInt64 {

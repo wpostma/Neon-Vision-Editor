@@ -26,7 +26,7 @@ The issue occurred in `EditorViewModel.swift` when loading file content asynchro
 Task.detached(priority: .userInitiated) {
     let content = try Data(contentsOf: url)
     // ... process content ...
-    
+
     // This await can execute DURING SwiftUI's view update cycle!
     await self.applyLoadedContent(
         tabID: tabID,
@@ -43,7 +43,7 @@ Task.detached(priority: .userInitiated) {
 3. **BUT**: The timing is unpredictable - it might execute while SwiftUI is rendering
 4. Modifying `@Published` properties during SwiftUI's view update creates a cycle:
    - SwiftUI reads `@Published var tabs` to render
-   - Your code modifies `tabs` 
+   - Your code modifies `tabs`
    - SwiftUI tries to re-read `tabs` (already in progress)
    - **Cycle detected!**
 
@@ -67,11 +67,11 @@ Wrap all `@Published` property modifications in a **two-layer async pattern**:
 Task.detached(priority: .userInitiated) {
     let content = try Data(contentsOf: url)
     // ... process content on background thread ...
-    
+
     // Layer 1: DispatchQueue.main.async - defers to next runloop
     DispatchQueue.main.async { [weak self] in
         guard let self = self else { return }
-        
+
         // Layer 2: Task @MainActor - maintains actor isolation
         Task { @MainActor in
             await self.applyLoadedContent(
@@ -113,7 +113,7 @@ Task.detached(priority: .userInitiated) { [url, tabID] in
     // Step 1: Read file on background thread (good!)
     let data = try Data(contentsOf: url)
     let content = String(decoding: data, as: UTF8.self)
-    
+
     // Step 2: Update UI - defer to next runloop
     DispatchQueue.main.async { [weak self] in
         guard let self = self else { return }
@@ -136,7 +136,7 @@ Location: `EditorViewModel.swift` - Large file streaming
 ```swift
 data = try EditorLoadHelper.streamFileData(from: url) { previewData in
     let preview = String(decoding: previewData, as: UTF8.self)
-    
+
     // Defer preview updates to avoid cycles
     DispatchQueue.main.async { [weak self] in
         guard let self = self else { return }
@@ -292,6 +292,6 @@ To verify the fix works:
 
 ---
 
-**Last Updated:** 2024-02-24  
-**Author:** AI Assistant (Claude)  
+**Last Updated:** 2024-02-24
+**Author:** AI Assistant (Claude)
 **Related Issues:** File loading failures, UI freezing, AttributeGraph cycles
