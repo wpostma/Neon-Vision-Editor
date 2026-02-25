@@ -1620,191 +1620,239 @@ struct ContentView: View {
 #endif
     }
 
-    // Layout: NavigationSplitView with optional sidebar and the primary code editor.
-    var body: some View {
-        platformLayout
-        .overlay(alignment: .topTrailing) {
-            if showFindReplace {
-                FindReplacePanel(
-                    findQuery: $findQuery,
-                    replaceQuery: $replaceQuery,
-                    useRegex: $findUsesRegex,
-                    caseSensitive: $findCaseSensitive,
-                    statusMessage: $findStatusMessage,
-                    onFindNext: { findNext() },
-                    onReplace: { replaceSelection() },
-                    onReplaceAll: { replaceAll() },
-                    onClose: { showFindReplace = false }
+    // MARK: - Body Helper Views
+    
+    // Extract alerts to reduce body complexity
+    @ViewBuilder
+    private var alertModifiers: some View {
+        Color.clear
+            .alert("AI Error", isPresented: showGrokError) {
+                Button("OK") { }
+            } message: {
+                Text(grokErrorMessage.wrappedValue)
+            }
+            .alert(
+                "Whitespace Scalars",
+                isPresented: Binding(
+                    get: { whitespaceInspectorMessage != nil },
+                    set: { if !$0 { whitespaceInspectorMessage = nil } }
                 )
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
-                .padding(.top, 50)
-                .padding(.trailing, 16)
-                .transition(.move(edge: .top).combined(with: .opacity))
+            ) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(whitespaceInspectorMessage ?? "")
             }
+            .alert("File Open Error", isPresented: Binding(
+                get: { viewModel.showFileOpenError },
+                set: { viewModel.showFileOpenError = $0 }
+            )) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(viewModel.fileOpenErrorMessage)
+            }
+    }
+    
+    // Extract onChange modifiers to reduce body complexity
+    private func applyChangeHandlers<V: View>(_ content: V) -> some View {
+        content
+            .modifier(LineWrapChangeModifier(contentView: self))
+            .modifier(HighlightRefreshModifier(contentView: self))
+            .modifier(TabPersistenceModifier(contentView: self))
+    }
+    
+    private struct LineWrapChangeModifier: ViewModifier {
+        let contentView: ContentView
+        
+        func body(content: Content) -> some View {
+            content
+                .onChange(of: contentView.settingsLineWrapEnabled) { _, enabled in
+                    if contentView.viewModel.isLineWrapEnabled != enabled {
+                        contentView.viewModel.isLineWrapEnabled = enabled
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .whitespaceScalarInspectionResult)) { notif in
+                    guard contentView.matchesCurrentWindow(notif) else { return }
+                    if let msg = notif.userInfo?[EditorCommandUserInfo.inspectionMessage] as? String {
+                        contentView.whitespaceInspectorMessage = msg
+                    }
+                }
+                .onChange(of: contentView.viewModel.isLineWrapEnabled) { _, enabled in
+                    if contentView.settingsLineWrapEnabled != enabled {
+                        contentView.settingsLineWrapEnabled = enabled
+                    }
+                }
+                .onChange(of: contentView.appUpdateManager.automaticPromptToken) { _, _ in
+                    if contentView.appUpdateManager.consumeAutomaticPromptIfNeeded() {
+                        contentView.showUpdaterDialog(checkNow: false)
+                    }
+                }
         }
-        .animation(.easeInOut(duration: 0.2), value: showFindReplace)
-        .alert("AI Error", isPresented: showGrokError) {
-            Button("OK") { }
-        } message: {
-            Text(grokErrorMessage.wrappedValue)
+    }
+    
+    private struct HighlightRefreshModifier: ViewModifier {
+        let contentView: ContentView
+        
+        func body(content: Content) -> some View {
+            content
+                .onChange(of: contentView.settingsThemeName) { _, _ in
+                    contentView.scheduleHighlightRefresh()
+                }
+                .onChange(of: contentView.highlightMatchingBrackets) { _, _ in
+                    contentView.scheduleHighlightRefresh()
+                }
+                .onChange(of: contentView.showScopeGuides) { _, _ in
+                    contentView.scheduleHighlightRefresh()
+                }
+                .onChange(of: contentView.highlightScopeBackground) { _, _ in
+                    contentView.scheduleHighlightRefresh()
+                }
+                .onChange(of: contentView.viewModel.isLineWrapEnabled) { _, _ in
+                    contentView.scheduleHighlightRefresh()
+                }
         }
-        .alert(
-            "Whitespace Scalars",
-            isPresented: Binding(
-                get: { whitespaceInspectorMessage != nil },
-                set: { if !$0 { whitespaceInspectorMessage = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(whitespaceInspectorMessage ?? "")
-        }
-        .alert("File Open Error", isPresented: Binding(
-            get: { viewModel.showFileOpenError },
-            set: { viewModel.showFileOpenError = $0 }
-        )) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(viewModel.fileOpenErrorMessage)
-        }
-        .navigationTitle("Neon Vision Editor")
+    }
+    
+    private struct TabPersistenceModifier: ViewModifier {
+        let contentView: ContentView
+        
+        func body(content: Content) -> some View {
+            content
+                .onChange(of: contentView.viewModel.tabs) { _, _ in
+                    contentView.persistSessionIfReady()
 #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
+                    contentView.persistUnsavedDraftSnapshotIfNeeded()
 #endif
-        .onAppear {
-            if UserDefaults.standard.object(forKey: "SettingsAutoIndent") == nil {
-                autoIndentEnabled = true
-            }
+                }
+        }
+    }
+    
+    // Extract lifecycle handlers to reduce body complexity
+    private func applyLifecycleHandlers<V: View>(_ content: V) -> some View {
+        content
+            .onAppear {
+                if UserDefaults.standard.object(forKey: "SettingsAutoIndent") == nil {
+                    autoIndentEnabled = true
+                }
 #if os(iOS)
-            if UserDefaults.standard.object(forKey: "SettingsShowKeyboardAccessoryBarIOS") == nil {
-                showKeyboardAccessoryBarIOS = false
-            }
+                if UserDefaults.standard.object(forKey: "SettingsShowKeyboardAccessoryBarIOS") == nil {
+                    showKeyboardAccessoryBarIOS = false
+                }
 #endif
 #if os(macOS)
-            if UserDefaults.standard.object(forKey: "ShowBracketHelperBarMac") == nil {
-                showBracketHelperBarMac = false
-            }
+                if UserDefaults.standard.object(forKey: "ShowBracketHelperBarMac") == nil {
+                    showBracketHelperBarMac = false
+                }
 #endif
-            // Always start with completion disabled on app launch/open.
-            isAutoCompletionEnabled = false
-            UserDefaults.standard.set(false, forKey: "SettingsCompletionEnabled")
-            // Keep whitespace marker rendering disabled by default and after migrations.
-            UserDefaults.standard.set(false, forKey: "SettingsShowInvisibleCharacters")
-            UserDefaults.standard.set(false, forKey: "NSShowAllInvisibles")
-            UserDefaults.standard.set(false, forKey: "NSShowControlCharacters")
-            viewModel.isLineWrapEnabled = settingsLineWrapEnabled
-            syncAppleCompletionAvailability()
-        }
-        .onChange(of: settingsLineWrapEnabled) { _, enabled in
-            if viewModel.isLineWrapEnabled != enabled {
-                viewModel.isLineWrapEnabled = enabled
+                // Always start with completion disabled on app launch/open.
+                isAutoCompletionEnabled = false
+                UserDefaults.standard.set(false, forKey: "SettingsCompletionEnabled")
+                // Keep whitespace marker rendering disabled by default and after migrations.
+                UserDefaults.standard.set(false, forKey: "SettingsShowInvisibleCharacters")
+                UserDefaults.standard.set(false, forKey: "NSShowAllInvisibles")
+                UserDefaults.standard.set(false, forKey: "NSShowControlCharacters")
+                viewModel.isLineWrapEnabled = settingsLineWrapEnabled
+                syncAppleCompletionAvailability()
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .whitespaceScalarInspectionResult)) { notif in
-            guard matchesCurrentWindow(notif) else { return }
-            if let msg = notif.userInfo?[EditorCommandUserInfo.inspectionMessage] as? String {
-                whitespaceInspectorMessage = msg
+            .onOpenURL { url in
+                viewModel.openFile(url: url)
             }
-        }
-        .onChange(of: viewModel.isLineWrapEnabled) { _, enabled in
-            if settingsLineWrapEnabled != enabled {
-                settingsLineWrapEnabled = enabled
-            }
-        }
-        .onChange(of: appUpdateManager.automaticPromptToken) { _, _ in
-            if appUpdateManager.consumeAutomaticPromptIfNeeded() {
-                showUpdaterDialog(checkNow: false)
-            }
-        }
-        .onChange(of: settingsThemeName) { _, _ in
-            scheduleHighlightRefresh()
-        }
-        .onChange(of: highlightMatchingBrackets) { _, _ in
-            scheduleHighlightRefresh()
-        }
-        .onChange(of: showScopeGuides) { _, _ in
-            scheduleHighlightRefresh()
-        }
-        .onChange(of: highlightScopeBackground) { _, _ in
-            scheduleHighlightRefresh()
-        }
-        .onChange(of: viewModel.isLineWrapEnabled) { _, _ in
-            scheduleHighlightRefresh()
-        }
-        .onChange(of: viewModel.tabs) { _, _ in
-            persistSessionIfReady()
 #if os(iOS)
-            persistUnsavedDraftSnapshotIfNeeded()
-#endif
-        }
-        .onOpenURL { url in
-            viewModel.openFile(url: url)
-        }
-#if os(iOS)
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-            persistSessionIfReady()
-            persistUnsavedDraftSnapshotIfNeeded()
-        }
-#endif
-        .modifier(ModalPresentationModifier(contentView: self))
-        .onAppear {
-            if !didRunInitialWindowLayoutSetup {
-                // Start with sidebars collapsed only once; otherwise toggles can get reset on layout transitions.
-                viewModel.showSidebar = false
-                showProjectStructureSidebar = false
-                didRunInitialWindowLayoutSetup = true
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                persistSessionIfReady()
+                persistUnsavedDraftSnapshotIfNeeded()
             }
+#endif
+            .onAppear {
+                if !didRunInitialWindowLayoutSetup {
+                    // Start with sidebars collapsed only once; otherwise toggles can get reset on layout transitions.
+                    viewModel.showSidebar = false
+                    showProjectStructureSidebar = false
+                    didRunInitialWindowLayoutSetup = true
+                }
 
-            applyStartupBehaviorIfNeeded()
+                applyStartupBehaviorIfNeeded()
 
-            // Keep iOS tab/editor layout stable by forcing Brain Dump off on mobile.
+                // Keep iOS tab/editor layout stable by forcing Brain Dump off on mobile.
 #if os(iOS)
-            viewModel.isBrainDumpMode = false
-            UserDefaults.standard.set(false, forKey: "BrainDumpModeEnabled")
+                viewModel.isBrainDumpMode = false
+                UserDefaults.standard.set(false, forKey: "BrainDumpModeEnabled")
 #else
-            if UserDefaults.standard.object(forKey: "BrainDumpModeEnabled") != nil {
-                viewModel.isBrainDumpMode = UserDefaults.standard.bool(forKey: "BrainDumpModeEnabled")
-            }
+                if UserDefaults.standard.object(forKey: "BrainDumpModeEnabled") != nil {
+                    viewModel.isBrainDumpMode = UserDefaults.standard.bool(forKey: "BrainDumpModeEnabled")
+                }
 #endif
 
-            applyWindowTranslucency(enableTranslucentWindow)
+                applyWindowTranslucency(enableTranslucentWindow)
 
-            // Only check welcome tour once per session to avoid re-triggering on view updates
-            if !hasCheckedWelcomeTour {
-                hasCheckedWelcomeTour = true
-                if !hasSeenWelcomeTourV1 || welcomeTourSeenRelease != WelcomeTourView.releaseID {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                        showWelcomeTour = true
+                // Only check welcome tour once per session to avoid re-triggering on view updates
+                if !hasCheckedWelcomeTour {
+                    hasCheckedWelcomeTour = true
+                    if !hasSeenWelcomeTourV1 || welcomeTourSeenRelease != WelcomeTourView.releaseID {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            showWelcomeTour = true
+                        }
                     }
                 }
             }
-        }
 #if os(macOS)
-        .background(
-            WindowAccessor { window in
-                updateWindowRegistration(window)
+            .background(
+                WindowAccessor { window in
+                    updateWindowRegistration(window)
+                }
+                .frame(width: 0, height: 0)
+            )
+            .onDisappear {
+                completionDebounceTask?.cancel()
+                completionTask?.cancel()
+                lastCompletionTriggerSignature = ""
+                pendingHighlightRefresh?.cancel()
+                completionCache.removeAll(keepingCapacity: false)
+                if let number = hostWindowNumber,
+                   let window = NSApp.window(withWindowNumber: number),
+                   let delegate = windowCloseConfirmationDelegate,
+                   window.delegate === delegate {
+                    window.delegate = delegate.forwardedDelegate
+                }
+                windowCloseConfirmationDelegate = nil
+                if let number = hostWindowNumber {
+                    WindowViewModelRegistry.shared.unregister(windowNumber: number)
+                }
             }
-            .frame(width: 0, height: 0)
-        )
-        .onDisappear {
-            completionDebounceTask?.cancel()
-            completionTask?.cancel()
-            lastCompletionTriggerSignature = ""
-            pendingHighlightRefresh?.cancel()
-            completionCache.removeAll(keepingCapacity: false)
-            if let number = hostWindowNumber,
-               let window = NSApp.window(withWindowNumber: number),
-               let delegate = windowCloseConfirmationDelegate,
-               window.delegate === delegate {
-                window.delegate = delegate.forwardedDelegate
-            }
-            windowCloseConfirmationDelegate = nil
-            if let number = hostWindowNumber {
-                WindowViewModelRegistry.shared.unregister(windowNumber: number)
-            }
-        }
 #endif
+    }
+
+    // Layout: NavigationSplitView with optional sidebar and the primary code editor.
+    var body: some View {
+        platformLayout
+            .overlay(alignment: .topTrailing) {
+                if showFindReplace {
+                    FindReplacePanel(
+                        findQuery: $findQuery,
+                        replaceQuery: $replaceQuery,
+                        useRegex: $findUsesRegex,
+                        caseSensitive: $findCaseSensitive,
+                        statusMessage: $findStatusMessage,
+                        onFindNext: { findNext() },
+                        onReplace: { replaceSelection() },
+                        onReplaceAll: { replaceAll() },
+                        onClose: { showFindReplace = false }
+                    )
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .shadow(color: .black.opacity(0.2), radius: 8, x: 0, y: 4)
+                    .padding(.top, 50)
+                    .padding(.trailing, 16)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.easeInOut(duration: 0.2), value: showFindReplace)
+            .navigationTitle("Neon Vision Editor")
+#if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+#endif
+            .background(alertModifiers)
+            .modifier(ChangeHandlerModifier(contentView: self))
+            .modifier(LifecycleHandlerModifier(contentView: self))
+            .modifier(ModalPresentationModifier(contentView: self))
     }
     
     private func scheduleHighlightRefresh(delay: TimeInterval = 0.05) {
@@ -1823,6 +1871,22 @@ struct ContentView: View {
         return length >= EditorPerformanceThresholds.heavyFeatureUTF16Length
     }
 #endif
+
+    private struct ChangeHandlerModifier: ViewModifier {
+        let contentView: ContentView
+        
+        func body(content: Content) -> some View {
+            contentView.applyChangeHandlers(content)
+        }
+    }
+    
+    private struct LifecycleHandlerModifier: ViewModifier {
+        let contentView: ContentView
+        
+        func body(content: Content) -> some View {
+            contentView.applyLifecycleHandlers(content)
+        }
+    }
 
     private struct ModalPresentationModifier: ViewModifier {
         let contentView: ContentView
@@ -2373,14 +2437,27 @@ struct ContentView: View {
            viewModel.tabs.contains(where: { $0.id == selectedID }) {
             return Binding(
                 get: {
-                    viewModel.tabs.first(where: { $0.id == selectedID })?.content ?? singleContent
+                    let content = viewModel.tabs.first(where: { $0.id == selectedID })?.content ?? singleContent
+                    let contentLength = content.count
+                    let tabName = viewModel.tabs.first(where: { $0.id == selectedID })?.name ?? "unknown"
+                    let isLoading = viewModel.tabs.first(where: { $0.id == selectedID })?.isLoadingContent ?? false
+                    print("📖 [BINDING-GET] Reading content for tab '\(tabName)': \(contentLength) chars, isLoading: \(isLoading)")
+                    if contentLength == 0 && !isLoading {
+                        print("⚠️ [BINDING-GET] WARNING: Tab '\(tabName)' has ZERO content and is NOT loading!")
+                    }
+                    return content
                 },
                 set: { newValue in
-                    guard let tab = viewModel.tabs.first(where: { $0.id == selectedID }) else { return }
+                    guard let tab = viewModel.tabs.first(where: { $0.id == selectedID }) else { 
+                        print("❌ [BINDING-SET] Tab not found for ID: \(selectedID)")
+                        return 
+                    }
+                    print("📝 [BINDING-SET] Setting content for tab '\(tab.name)': \(newValue.count) chars")
                     viewModel.updateTabContent(tab: tab, content: newValue)
                 }
             )
         } else {
+            print("📖 [BINDING-GET] No selected tab, using singleContent: \(singleContent.count) chars")
             return $singleContent
         }
     }

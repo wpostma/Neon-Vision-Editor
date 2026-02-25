@@ -314,7 +314,10 @@ final class PieceTableDocument {
 // TODO This probably should be a class that manages the data in here, because setting content should cause the dirty flag to set
 // TODO Also another state "notLoaded" is probably needed, and if notLoaded is true, then isDirty can't matter.
 // TODO why bother with a piecetabledocument if we get and set it as a string?
-struct TabData: Identifiable {
+struct TabData: Identifiable, Equatable {
+    static func == (lhs: TabData, rhs: TabData) -> Bool {
+        lhs.id == rhs.id
+    }
     let id = UUID()
     var name: String
     private var contentStorage: PieceTableDocument
@@ -899,6 +902,7 @@ final class EditorViewModel {
         }
 
         print("🔴 [TRACE] applyLoadedContent() - About to modify tabs array properties")
+        print("🔴 [TRACE] applyLoadedContent() - Tab[\(index)] BEFORE: name='\(tabs[index].name)', contentLength=\(tabs[index].content.count), isLoading=\(tabs[index].isLoadingContent)")
         // Batch property updates to avoid triggering multiple SwiftUI updates
         tabs[index].language = language
         tabs[index].languageLocked = languageLocked
@@ -906,6 +910,7 @@ final class EditorViewModel {
         tabs[index].lastSavedFingerprint = fingerprint
         tabs[index].isLargeFileCandidate = isLargeCandidate
         print("🔴 [TRACE] applyLoadedContent() - Metadata properties set")
+        print("🔴 [TRACE] applyLoadedContent() - Tab[\(index)] AFTER metadata: contentLength=\(tabs[index].content.count)")
         
         // For large files, use chunked assignment to avoid blocking the main thread
         let contentUTF16Count = (content as NSString).length
@@ -949,13 +954,18 @@ final class EditorViewModel {
             // Small files: direct assignment
             print("🟠 [TRACE] applyLoadedContent() - Small file, yielding then setting content")
             await Task.yield()
-            print("🟠 [TRACE] applyLoadedContent() - Setting content for small file")
+            print("🟠 [TRACE] applyLoadedContent() - Setting content for small file (length: \(content.count))")
             tabs[index].content = content
             print("🟠 [TRACE] applyLoadedContent() - Content set for small file")
+            print("🟠 [TRACE] applyLoadedContent() - Tab[\(index)] content NOW: \(tabs[index].content.count) chars")
+            print("🟠 [TRACE] applyLoadedContent() - Verifying: content starts with: \(String(content.prefix(50)))")
         }
         
         print("🔴 [TRACE] applyLoadedContent() - Setting isLoadingContent = false")
         tabs[index].isLoadingContent = false
+        print("🔴 [TRACE] applyLoadedContent() - Tab[\(index)] FINAL STATE: name='\(tabs[index].name)', contentLength=\(tabs[index].content.count), isLoading=\(tabs[index].isLoadingContent), isDirty=\(tabs[index].isDirty)")
+        print("🔴 [TRACE] applyLoadedContent() - selectedTabID=\(String(describing: selectedTabID)), this tab ID=\(tabs[index].id)")
+        print("🔴 [TRACE] applyLoadedContent() - Tab is selected: \(selectedTabID == tabs[index].id)")
         
         // Log file statistics with timing
         let elapsed = Date().timeIntervalSince(startTime)

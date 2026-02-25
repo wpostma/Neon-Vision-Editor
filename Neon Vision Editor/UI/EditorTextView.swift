@@ -1851,14 +1851,10 @@ struct CustomTextEditor: NSViewRepresentable {
         // Seed initial text (strip control pictures when invisibles are hidden)
         let seeded = sanitizedForExternalSet(text)
         textView.string = seeded
-        if seeded != text {
-            // Keep binding clean of control-picture glyphs.
-            DispatchQueue.main.async {
-                if self.text != seeded {
-                    self.text = seeded
-                }
-            }
-        }
+        // NOTE: Removed DispatchQueue.main.async write-back to binding.
+        // With @Observable, the binding is the source of truth. If sanitization
+        // changes the text, that should be handled by the coordinator's text sync,
+        // not by writing back here during initialization.
         context.coordinator.scheduleHighlightIfNeeded(currentText: text, immediate: true)
 
         // Keep container width in sync when the scroll view resizes
@@ -1886,20 +1882,22 @@ struct CustomTextEditor: NSViewRepresentable {
 
             // Sanitize and avoid publishing binding during update
             let target = sanitizedForExternalSet(text)
+            print("🔵 [UPDATE-NSVIEW] text.count=\(text.count), target.count=\(target.count), textView.string.count=\(textView.string.count), isTabLoadingContent=\(isTabLoadingContent)")
             if textView.string != target {
                 let hasFocus = (textView.window?.firstResponder as? NSTextView) === textView
                 let shouldPreferEditorBuffer = hasFocus && !isTabLoadingContent
+                print("🔵 [UPDATE-NSVIEW] Mismatch detected: hasFocus=\(hasFocus), shouldPreferEditorBuffer=\(shouldPreferEditorBuffer)")
                 if shouldPreferEditorBuffer {
+                    print("🟢 [UPDATE-NSVIEW] Preferring editor buffer, syncing textView.string (\(textView.string.count) chars) to binding")
                     context.coordinator.syncBindingTextImmediately(textView.string)
                 } else {
+                    print("🟠 [UPDATE-NSVIEW] Preferring binding, replacing textView with target (\(target.count) chars)")
                     context.coordinator.cancelPendingBindingSync()
                     replaceTextPreservingSelectionAndFocus(textView, with: target)
                     context.coordinator.invalidateHighlightCache()
-                    DispatchQueue.main.async {
-                        if self.text != target {
-                            self.text = target
-                        }
-                    }
+                    // NOTE: Removed DispatchQueue.main.async write-back to binding.
+                    // With @Observable, this defensive write-back is unnecessary and causes
+                    // content to be cleared. The binding is the source of truth, not the target.
                 }
             }
 
@@ -1934,11 +1932,9 @@ struct CustomTextEditor: NSViewRepresentable {
                 if sanitized != textView.string {
                     replaceTextPreservingSelectionAndFocus(textView, with: sanitized)
                     context.coordinator.invalidateHighlightCache()
-                    DispatchQueue.main.async {
-                        if self.text != sanitized {
-                            self.text = sanitized
-                        }
-                    }
+                    // NOTE: Removed DispatchQueue.main.async write-back to binding.
+                    // With @Observable, if the textView needs sanitization, the coordinator
+                    // will sync it back via syncBindingText when appropriate.
                 }
             }
             if let storage = textView.textStorage {
