@@ -830,11 +830,11 @@ class EditorViewModel: ObservableObject {
                 let lineCount = content.components(separatedBy: .newlines).count
                 let formattedSize = ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)
                 AppLogger.shared.info("Applying loaded content for: \(url.lastPathComponent) - \(lineCount) lines, \(formattedSize)", category: "Editor")
-                print("⚪️ [TRACE] About to schedule DispatchQueue.main.async for applyLoadedContent")
-                // Use DispatchQueue to defer updates outside of potential view update cycles
-                DispatchQueue.main.async { [weak self, startTime] in
-                    print("⚪️ [TRACE] DispatchQueue.main.async EXECUTING for applyLoadedContent - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
-                    guard let self = self else { return }
+                print("⚪️ [TRACE] About to call applyLoadedContent on MainActor")
+                // Apply content immediately on main actor - no DispatchQueue deferral needed here
+                // because we're coming from background Task.detached, not from a UI action
+                await MainActor.run { [startTime] in
+                    print("⚪️ [TRACE] MainActor.run EXECUTING for applyLoadedContent")
                     Task { @MainActor in
                         print("⚪️ [TRACE] Task @MainActor STARTED for applyLoadedContent")
                         await self.applyLoadedContent(
