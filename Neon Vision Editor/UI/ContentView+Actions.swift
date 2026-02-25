@@ -266,6 +266,58 @@ extension ContentView {
         viewModel.closeTab(tab: tab)
         self.pendingCloseTabID = nil
     }
+    
+    // Bulk close operations - reuse requestCloseTab() for each dirty tab
+    func requestCloseOtherTabs(except keepTab: TabData) {
+        let tabsToClose = viewModel.tabs.filter { $0.id != keepTab.id }
+        
+        // Check if any tabs are dirty
+        let dirtyTabs = tabsToClose.filter { $0.isDirty }
+        
+        if dirtyTabs.isEmpty {
+            // No dirty tabs, close immediately
+            viewModel.closeOtherTabs(except: keepTab)
+        } else {
+            // Close dirty tabs one by one using existing dialog
+            for tab in tabsToClose {
+                requestCloseTab(tab)
+            }
+        }
+    }
+    
+    func requestCloseTabsToLeft(of tab: TabData) {
+        guard let targetIndex = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        guard targetIndex > 0 else { return }
+        
+        let tabsToClose = Array(viewModel.tabs[0..<targetIndex])
+        let dirtyTabs = tabsToClose.filter { $0.isDirty }
+        
+        if dirtyTabs.isEmpty {
+            viewModel.closeTabsToLeft(of: tab)
+        } else {
+            // Close dirty tabs one by one using existing dialog
+            for closeTab in tabsToClose {
+                requestCloseTab(closeTab)
+            }
+        }
+    }
+    
+    func requestCloseTabsToRight(of tab: TabData) {
+        guard let targetIndex = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        guard targetIndex < viewModel.tabs.count - 1 else { return }
+        
+        let tabsToClose = Array(viewModel.tabs[(targetIndex + 1)...])
+        let dirtyTabs = tabsToClose.filter { $0.isDirty }
+        
+        if dirtyTabs.isEmpty {
+            viewModel.closeTabsToRight(of: tab)
+        } else {
+            // Close dirty tabs one by one using existing dialog
+            for closeTab in tabsToClose {
+                requestCloseTab(closeTab)
+            }
+        }
+    }
 
     func findNext() {
 #if os(macOS)

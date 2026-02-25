@@ -629,13 +629,12 @@ final class EditorViewModel {
 
     // Closes a tab while guaranteeing one tab remains open.
     func closeTab(tab: TabData) {
-        // Release security-scoped access if no other tabs use this file
-        if let url = tab.fileURL {
-            let stillInUse = tabs.contains { $0.id != tab.id && $0.fileURL == url }
-            if !stillInUse {
-                FileAccessManager.shared.releaseAccess(to: url)
-            }
-        }
+        // NOTE: We intentionally DO NOT release security-scoped access here.
+        // FileAccessManager maintains access for the entire app session because:
+        // 1. User may reopen the file from Recent Files menu
+        // 2. Security-scoped bookmarks can't be re-acquired without user interaction
+        // 3. Access is automatically released on app termination
+        // See: FileAccessManager.swift and FILE_ACCESS_MANAGER.md
         
         // With @Observable, direct modifications are safe - no cycles!
         tabs.removeAll { $0.id == tab.id }
@@ -643,6 +642,45 @@ final class EditorViewModel {
             addNewTab()
         } else if selectedTabID == tab.id {
             selectedTabID = tabs.first?.id
+        }
+    }
+    
+    // Closes all tabs except the specified one
+    func closeOtherTabs(except tab: TabData) {
+        // NOTE: We intentionally DO NOT release security-scoped access here.
+        // FileAccessManager maintains access for the entire app session.
+        // See closeTab() for detailed explanation.
+        
+        tabs.removeAll { $0.id != tab.id }
+        selectedTabID = tab.id
+    }
+    
+    // Closes all tabs to the left of the specified tab
+    func closeTabsToLeft(of tab: TabData) {
+        guard let targetIndex = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        guard targetIndex > 0 else { return } // No tabs to the left
+        
+        // NOTE: We intentionally DO NOT release security-scoped access here.
+        // FileAccessManager maintains access for the entire app session.
+        // See closeTab() for detailed explanation.
+        
+        tabs.removeSubrange(0..<targetIndex)
+        // selectedTabID stays the same
+    }
+    
+    // Closes all tabs to the right of the specified tab
+    func closeTabsToRight(of tab: TabData) {
+        guard let targetIndex = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        guard targetIndex < tabs.count - 1 else { return } // No tabs to the right
+        
+        // NOTE: We intentionally DO NOT release security-scoped access here.
+        // FileAccessManager maintains access for the entire app session.
+        // See closeTab() for detailed explanation.
+        
+        tabs.removeSubrange((targetIndex + 1)...)
+        // If the selected tab was to the right, select the target tab
+        if let selectedID = selectedTabID, !tabs.contains(where: { $0.id == selectedID }) {
+            selectedTabID = tab.id
         }
     }
 

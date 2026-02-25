@@ -3725,6 +3725,24 @@ struct ContentView: View {
                                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                                             .fill(viewModel.selectedTabID == tab.id ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.10))
                                     )
+                                    .contextMenu {
+                                        Button("Close Others") {
+                                            requestCloseOtherTabs(except: tab)
+                                        }
+                                        .disabled(viewModel.tabs.count <= 1)
+                                        
+                                        Divider()
+                                        
+                                        Button("Close All Tabs to Left") {
+                                            requestCloseTabsToLeft(of: tab)
+                                        }
+                                        .disabled(viewModel.tabs.first?.id == tab.id)
+                                        
+                                        Button("Close All Tabs to Right") {
+                                            requestCloseTabsToRight(of: tab)
+                                        }
+                                        .disabled(viewModel.tabs.last?.id == tab.id)
+                                    }
                                 }
                             }
                         }
