@@ -1939,7 +1939,7 @@ struct CustomTextEditor: NSViewRepresentable, Equatable {
             let target = sanitizedForExternalSet(text)
             print("🔵 [UPDATE-NSVIEW] [\(language)] text.count=\(text.count), target.count=\(target.count), textView.string.count=\(textView.string.count), isTabLoadingContent=\(isTabLoadingContent)")
             if textView.string != target {
-                let hasFocus = (textView.window?.firstResponder as? NSTextView) === textView
+                //let hasFocus = (textView.window?.firstResponder as? NSTextView) === textView
                 // When binding != textView, ALWAYS prefer the binding (source of truth)
                 // updateNSView is for updating the VIEW from the MODEL, not the other way around
                 // User edits flow through textDidChange -> coordinator.syncBindingText

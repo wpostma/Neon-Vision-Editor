@@ -44,15 +44,15 @@ struct LogEntry: Identifiable, Equatable {
 
 /// Observable logger that maintains a list of log entries
 @MainActor
-class AppLogger: ObservableObject {
-    static let shared = AppLogger()
+final class AppLogger: ObservableObject, @unchecked Sendable {
+    nonisolated static let shared = AppLogger()
     
     @Published private(set) var entries: [LogEntry] = []
     @Published var maxEntries: Int = 1000
     @Published var filterLevel: LogEntry.LogLevel? = nil
     @Published var filterCategory: String? = nil
     
-    private init() {}
+    nonisolated private init() {}
     
     /// Log a message with a specific level and category
     nonisolated func log(_ message: String, level: LogEntry.LogLevel = .info, category: String = "General") {

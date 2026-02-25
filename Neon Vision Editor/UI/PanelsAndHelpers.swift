@@ -424,7 +424,7 @@ struct FindInFoldersPanel: View {
     }
     
     private func searchFiles(in root: URL, query: String) async {
-        let fm = FileManager.default
+        //let fm = FileManager.default
         var results: [SearchResult] = []
         var fileCount = 0
         

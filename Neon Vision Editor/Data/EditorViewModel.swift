@@ -948,8 +948,9 @@ final class EditorViewModel {
         isLargeCandidate: Bool,
         startTime: Date
     ) async {
-        print("🔴 [TRACE] applyLoadedContent() ENTERED - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
-        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { 
+        // This is not thread safe:
+        // print("🔴 [TRACE] applyLoadedContent() ENTERED - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else {
             print("🔴 [TRACE] applyLoadedContent() - Tab not found, exiting")
             return 
         }
@@ -1032,8 +1033,9 @@ final class EditorViewModel {
 
     @MainActor
     private func applyStreamingPreview(tabID: UUID, preview: String) async {
-        print("🟦 [TRACE] applyStreamingPreview() ENTERED - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
-        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else { 
+        // this is not thread safe:
+        // print("🟦 [TRACE] applyStreamingPreview() ENTERED - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
+        guard let index = tabs.firstIndex(where: { $0.id == tabID }) else {
             print("🟦 [TRACE] applyStreamingPreview() - Tab not found")
             return 
         }
