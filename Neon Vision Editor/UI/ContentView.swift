@@ -127,7 +127,7 @@ struct ContentView: View {
 #endif
 
     // Environment-provided view model and theme/error bindings
-    @EnvironmentObject var viewModel: EditorViewModel
+    @Environment(EditorViewModel.self) var viewModel: EditorViewModel
     @EnvironmentObject private var supportPurchaseManager: SupportPurchaseManager
     @EnvironmentObject var appUpdateManager: AppUpdateManager
     @Environment(\.colorScheme) var colorScheme

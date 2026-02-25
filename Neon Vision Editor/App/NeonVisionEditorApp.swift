@@ -63,7 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 private struct DetachedWindowContentView: View {
-    @StateObject private var viewModel = EditorViewModel()
+    @State private var viewModel = EditorViewModel()
     @ObservedObject var supportPurchaseManager: SupportPurchaseManager
     @ObservedObject var appUpdateManager: AppUpdateManager
     @Binding var showGrokError: Bool
@@ -71,7 +71,7 @@ private struct DetachedWindowContentView: View {
 
     var body: some View {
         ContentView()
-            .environmentObject(viewModel)
+            .environment(viewModel)
             .environmentObject(supportPurchaseManager)
             .environmentObject(appUpdateManager)
             .environment(\.showGrokError, $showGrokError)
@@ -83,7 +83,7 @@ private struct DetachedWindowContentView: View {
 
 @main
 struct NeonVisionEditorApp: App {
-    @StateObject private var viewModel = EditorViewModel()
+    @State private var viewModel = EditorViewModel()
     @StateObject private var supportPurchaseManager = SupportPurchaseManager()
     @StateObject private var appUpdateManager = AppUpdateManager()
     @StateObject private var recentFilesManager = RecentFilesManager.shared
@@ -284,7 +284,7 @@ struct NeonVisionEditorApp: App {
     private var mainWindowGroup: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(viewModel)
+                .environment(viewModel)
                 .environmentObject(supportPurchaseManager)
                 .environmentObject(appUpdateManager)
                 .onAppear {

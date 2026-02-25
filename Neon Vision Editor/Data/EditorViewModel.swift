@@ -464,33 +464,33 @@ final class EditorViewModel {
     // Updates tab text and applies language detection/locking heuristics.
     func updateTabContent(tab: TabData, content: String) {
         // With @Observable, direct modifications are safe - no cycles!
-        if let index = self.tabs.firstIndex(where: { $0.id == tab.id }) {
-                if self.tabs[index].isLoadingContent {
+        if let index = tabs.firstIndex(where: { $0.id == tab.id }) {
+                if tabs[index].isLoadingContent {
                     // During staged file load, content updates are system-driven; do not mark dirty
                     // and do not run language detection on partial content.
-                    self.tabs[index].content = content
+                    tabs[index].content = content
                     return
                 }
-                let previousLength = self.tabs[index].contentUTF16Length
+                let previousLength = tabs[index].contentUTF16Length
                 let newLength = (content as NSString).length
                 if previousLength == newLength, newLength <= 200_000 {
                     // Avoid re-running language detection and view updates when the text is unchanged.
-                    if self.tabs[index].content == content {
+                    if tabs[index].content == content {
                         return
                     }
                 }
-                self.tabs[index].content = content
-                if !self.tabs[index].isDirty {
-                    self.tabs[index].isDirty = true
+                tabs[index].content = content
+                if !tabs[index].isDirty {
+                    tabs[index].isDirty = true
                 }
 
                 let isLargeContent = (content as NSString).length >= 1_000_000
                 if isLargeContent {
-                    let nameExt = URL(fileURLWithPath: self.tabs[index].name).pathExtension.lowercased()
-                    if !self.tabs[index].languageLocked,
-                       let mapped = LanguageDetector.shared.preferredLanguage(for: self.tabs[index].fileURL) ??
-                                    self.languageMap[nameExt] {
-                        self.tabs[index].language = mapped
+                    let nameExt = URL(fileURLWithPath: tabs[index].name).pathExtension.lowercased()
+                    if !tabs[index].languageLocked,
+                       let mapped = LanguageDetector.shared.preferredLanguage(for: tabs[index].fileURL) ??
+                                    languageMap[nameExt] {
+                        tabs[index].language = mapped
                     }
                     return
                 }
@@ -516,34 +516,34 @@ final class EditorViewModel {
                     lower.contains("if let ")
                 )
                 if swiftStrongTokens {
-                    self.tabs[index].language = "swift"
-                    self.tabs[index].languageLocked = true
+                    tabs[index].language = "swift"
+                    tabs[index].languageLocked = true
                     return
                 }
                 
-                if !self.tabs[index].languageLocked {
+                if !tabs[index].languageLocked {
                     // If the tab name has a known extension, honor it and lock
-                    let nameExt = URL(fileURLWithPath: self.tabs[index].name).pathExtension.lowercased()
-                    if let extLang = self.languageMap[nameExt], !extLang.isEmpty {
+                    let nameExt = URL(fileURLWithPath: tabs[index].name).pathExtension.lowercased()
+                    if let extLang = languageMap[nameExt], !extLang.isEmpty {
                         // If the extension suggests C# but content looks like Swift, prefer Swift and do not lock.
                         if extLang == "csharp" {
                             let looksSwift = lower.contains("import swiftui") || lower.contains(": view") || lower.contains("@main") || lower.contains(" final class ")
                             if looksSwift {
-                                self.tabs[index].language = "swift"
-                                self.tabs[index].languageLocked = true
+                                tabs[index].language = "swift"
+                                tabs[index].languageLocked = true
                             } else {
-                                self.tabs[index].language = extLang
-                                self.tabs[index].languageLocked = true
+                                tabs[index].language = extLang
+                                tabs[index].languageLocked = true
                             }
                         } else {
-                            self.tabs[index].language = extLang
-                            self.tabs[index].languageLocked = true
+                            tabs[index].language = extLang
+                            tabs[index].languageLocked = true
                         }
                     } else {
-                        let result = LanguageDetector.shared.detect(text: content, name: self.tabs[index].name, fileURL: self.tabs[index].fileURL)
+                        let result = LanguageDetector.shared.detect(text: content, name: tabs[index].name, fileURL: tabs[index].fileURL)
                         let detected = result.lang
                         let scores = result.scores
-                        let current = self.tabs[index].language
+                        let current = tabs[index].language
                         let swiftScore = scores["swift"] ?? 0
                         let csharpScore = scores["csharp"] ?? 0
 
@@ -580,8 +580,8 @@ final class EditorViewModel {
                             } else if !(csharpContext && csharpScore >= swiftScore + requireMargin) {
                                 // Not enough evidence to switch away from Swift
                             } else {
-                                self.tabs[index].language = "csharp"
-                                self.tabs[index].languageLocked = false
+                                tabs[index].language = "csharp"
+                                tabs[index].languageLocked = false
                             }
                         } else {
                             // Never downgrade an already-detected language to plain while editing.
@@ -590,17 +590,16 @@ final class EditorViewModel {
                                 return
                             }
                             // For all other cases, accept the detection
-                            self.tabs[index].language = detected
+                            tabs[index].language = detected
                             // If Swift is confidently detected or Swift-only tokens are present, lock to prevent flip-flops
                             if detected == "swift" && (result.confidence >= 5 || swiftStrongTokens) {
-                                self.tabs[index].languageLocked = true
+                                tabs[index].languageLocked = true
                             }
                         }
                     }
                 }
             }
         }
-    }
 
     // Manually sets language and locks automatic switching.
     func updateTabLanguage(tab: TabData, language: String) {
@@ -612,17 +611,12 @@ final class EditorViewModel {
 
     // Closes a tab while guaranteeing one tab remains open.
     func closeTab(tab: TabData) {
-        // Defer @Published modifications to avoid cycles when called from menu/toolbar actions
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.tabs.removeAll { $0.id == tab.id }
-            if self.tabs.isEmpty {
-                // Use immediate version to avoid double deferral
-                let newTab = TabData(name: "Untitled \(self.tabs.count + 1)", content: "", language: self.defaultNewTabLanguage(), fileURL: nil, languageLocked: false)
-                self.addNewTabImmediate(newTab)
-            } else if self.selectedTabID == tab.id {
-                self.selectedTabID = self.tabs.first?.id
-            }
+        // With @Observable, direct modifications are safe - no cycles!
+        tabs.removeAll { $0.id == tab.id }
+        if tabs.isEmpty {
+            addNewTab()
+        } else if selectedTabID == tab.id {
+            selectedTabID = tabs.first?.id
         }
     }
 
@@ -769,19 +763,12 @@ final class EditorViewModel {
             isLargeFileCandidate: isLargeCandidate
         )
         
-        print("🟡 [TRACE] About to DEFER placeholder tab creation via DispatchQueue - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
-        
-        // CRITICAL FIX: Defer tab creation to avoid modifying @Published during view updates
-        // If openFile() is called from a menu action during SwiftUI rendering, direct
-        // modification of tabs/selectedTabID creates AttributeGraph cycles.
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            print("🟡 [TRACE] DispatchQueue executing placeholder tab creation - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
-            self.tabs.append(placeholderTab)
-            print("🟢 [TRACE] Placeholder tab appended - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
-            self.selectedTabID = placeholderTab.id
-            print("🟢 [TRACE] selectedTabID set - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
-        }
+        // With @Observable, direct modifications are safe - no cycles!
+        print("🟢 [TRACE] Creating placeholder tab directly - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
+        tabs.append(placeholderTab)
+        print("🟢 [TRACE] Placeholder tab appended - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
+        selectedTabID = placeholderTab.id
+        print("🟢 [TRACE] selectedTabID set - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
         AppLogger.shared.info("Placeholder tab created, launching file read task for: \(url.lastPathComponent)", category: "Editor")
 
         let tabID = placeholderTab.id  // Capture ID before async operations
@@ -802,15 +789,10 @@ final class EditorViewModel {
                     data = try EditorLoadHelper.streamFileData(from: url) { previewData in
                         let previewRaw = String(decoding: previewData, as: UTF8.self)
                         let preview = EditorLoadHelper.sanitizeTextForFileLoad(previewRaw, useFastPath: true)
-                        print("⬜️ [TRACE] About to schedule DispatchQueue.main.async for applyStreamingPreview")
-                        // Defer preview updates to avoid view update cycles
-                        DispatchQueue.main.async { [weak self] in
-                            print("⬜️ [TRACE] DispatchQueue.main.async EXECUTING for applyStreamingPreview - Thread: \(Thread.isMainThread ? "MAIN" : "BACKGROUND")")
-                            guard let self = self else { return }
-                            Task { @MainActor in
-                                print("⬜️ [TRACE] Task @MainActor STARTED for applyStreamingPreview")
-                                await self.applyStreamingPreview(tabID: tabID, preview: preview)
-                            }
+                        // With @Observable, direct modifications are safe - no cycles!
+                        Task { @MainActor in
+                            print("⬜️ [TRACE] Task @MainActor for applyStreamingPreview")
+                            await self.applyStreamingPreview(tabID: tabID, preview: preview)
                         }
                     }
                 } else {
@@ -1008,11 +990,8 @@ final class EditorViewModel {
     // Focuses an existing tab for URL if present.
     func focusTabIfOpen(for url: URL) -> Bool {
         if let existingIndex = indexOfOpenTab(for: url) {
-            // Defer @Published modifications to avoid cycles when called from menu/toolbar actions
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                self.selectedTabID = self.tabs[existingIndex].id
-            }
+            // With @Observable, direct modifications are safe - no cycles!
+            selectedTabID = tabs[existingIndex].id
             return true
         }
         return false
