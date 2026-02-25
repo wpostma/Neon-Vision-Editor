@@ -3655,63 +3655,104 @@ struct ContentView: View {
     @ViewBuilder
     var tabBarView: some View {
         VStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    if viewModel.tabs.isEmpty {
-                        Button {
-                            viewModel.addNewTab()
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text("Untitled 1")
-                                    .lineLimit(1)
-                                    .font(.system(size: 12, weight: .semibold))
-                                Image(systemName: "plus")
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(NeonUIStyle.accentBlue)
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(Color.accentColor.opacity(0.18))
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        ForEach(viewModel.tabs) { tab in
-                            HStack(spacing: 8) {
+            GeometryReader { geometry in
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            if viewModel.tabs.isEmpty {
                                 Button {
-                                    viewModel.selectedTabID = tab.id
+                                    viewModel.addNewTab()
                                 } label: {
-                                    Text(tab.name + (tab.isDirty ? " •" : ""))
-                                        .lineLimit(1)
-                                        .font(.system(size: 12, weight: viewModel.selectedTabID == tab.id ? .semibold : .regular))
-                                        .padding(.leading, 10)
-                                        .padding(.vertical, 6)
+                                    HStack(spacing: 6) {
+                                        Text("Untitled 1")
+                                            .lineLimit(1)
+                                            .font(.system(size: 12, weight: .semibold))
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundStyle(NeonUIStyle.accentBlue)
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(Color.accentColor.opacity(0.18))
+                                    )
                                 }
                                 .buttonStyle(.plain)
+                            } else {
+                                ForEach(viewModel.tabs) { tab in
+                                    HStack(spacing: 8) {
+                                        Button {
+                                            viewModel.selectedTabID = tab.id
+                                        } label: {
+                                            Text(tab.name + (tab.isDirty ? " •" : ""))
+                                                .lineLimit(1)
+                                                .font(.system(size: 12, weight: viewModel.selectedTabID == tab.id ? .semibold : .regular))
+                                                .padding(.leading, 10)
+                                                .padding(.vertical, 6)
+                                        }
+                                        .buttonStyle(.plain)
 
-                                Button {
-                                    requestCloseTab(tab)
-                                } label: {
-                                    Image(systemName: "xmark")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .padding(.trailing, 10)
+                                        Button {
+                                            requestCloseTab(tab)
+                                        } label: {
+                                            Image(systemName: "xmark")
+                                                .font(.system(size: 10, weight: .bold))
+                                                .padding(.trailing, 10)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .contentShape(Rectangle())
+                                        .help("Close \(tab.name)")
+                                    }
+                                    .id(tab.id)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(viewModel.selectedTabID == tab.id ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.10))
+                                    )
                                 }
-                                .buttonStyle(.plain)
-                                .contentShape(Rectangle())
-                                .help("Close \(tab.name)")
                             }
-                            .background(
-                                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(viewModel.selectedTabID == tab.id ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.10))
-                            )
+                        }
+                        .padding(.leading, tabBarLeadingPadding)
+                        .padding(.trailing, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            GeometryReader { contentGeometry in
+                                Color.clear.preference(
+                                    key: TabBarContentWidthKey.self,
+                                    value: contentGeometry.size.width
+                                )
+                            }
+                        )
+                    }
+                    .onChange(of: viewModel.selectedTabID) { _, newTabID in
+                        if let newTabID {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                proxy.scrollTo(newTabID, anchor: .center)
+                            }
                         }
                     }
                 }
-                .padding(.leading, tabBarLeadingPadding)
-                .padding(.trailing, 10)
-                .padding(.vertical, 6)
+                .onPreferenceChange(TabBarContentWidthKey.self) { contentWidth in
+                    let needsFade = contentWidth > geometry.size.width
+                    if needsFade {
+                        // Apply gradient mask only when content overflows
+                    }
+                }
+                .overlay(alignment: .leading) {
+                    if shouldShowTabBarFade(contentWidth: tabBarContentWidth, viewWidth: geometry.size.width) {
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color.black.opacity(0),
+                                Color.black.opacity(0)
+                            ]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: 20)
+                        .allowsHitTesting(false)
+                        .blendMode(.destinationOut)
+                    }
+                }
             }
             Divider().opacity(0.45)
         }
