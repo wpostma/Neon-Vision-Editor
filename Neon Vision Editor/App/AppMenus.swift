@@ -160,6 +160,7 @@ struct AppMenuCommands {
         CommandGroup(after: .newItem) {
             Button("Open File...") {
                 Task { @MainActor in
+                    NotificationCenter.default.post(name: .dismissWelcomeTourRequested, object: nil)
                     currentActiveEditorViewModel.openFile()
                 }
             }
@@ -179,6 +180,7 @@ struct AppMenuCommands {
                     ForEach(recentFilesManager.recentFiles, id: \.self) { url in
                         Button(displayNames[url] ?? url.lastPathComponent) {
                             Task { @MainActor in
+                                NotificationCenter.default.post(name: .dismissWelcomeTourRequested, object: nil)
                                 currentActiveEditorViewModel.openFile(url: url)
                             }
                         }
@@ -303,6 +305,11 @@ struct AppMenuCommands {
                 UserDefaults.standard.set(next, forKey: "EnableTranslucentWindow")
                 postWindowCommand(.toggleTranslucencyRequested, object: next)
             }
+            
+            Button("Toggle Markdown Preview") {
+                postWindowCommand(.toggleMarkdownPreviewRequested)
+            }
+            .keyboardShortcut("m", modifiers: [.command, .shift])
 
             Divider()
 

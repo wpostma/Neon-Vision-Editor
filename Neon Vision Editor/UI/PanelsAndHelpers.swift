@@ -961,6 +961,8 @@ extension Notification.Name {
     static let showQuickSwitcherRequested = Notification.Name("showQuickSwitcherRequested")
     static let showFindInFoldersRequested = Notification.Name("showFindInFoldersRequested")
     static let showWelcomeTourRequested = Notification.Name("showWelcomeTourRequested")
+    static let dismissWelcomeTourRequested = Notification.Name("dismissWelcomeTourRequested")
+    static let toggleMarkdownPreviewRequested = Notification.Name("toggleMarkdownPreviewRequested")
     static let moveCursorToRange = Notification.Name("moveCursorToRange")
     static let toggleVimModeRequested = Notification.Name("toggleVimModeRequested")
     static let vimModeStateDidChange = Notification.Name("vimModeStateDidChange")
@@ -1096,7 +1098,8 @@ struct WelcomeTourWindowPresenter: NSViewRepresentable {
 
         func presentIfNeeded() {
             guard window == nil else {
-                window?.makeKeyAndOrderFront(nil)
+                // Window already exists, don't bring it to front automatically
+                // User can manually click on the window if they want to bring it back
                 return
             }
 

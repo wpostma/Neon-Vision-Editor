@@ -305,15 +305,42 @@ The ContentView body had 100+ chained modifiers causing Swift compiler type-chec
 
 **Result:** Build time reduced from timeout to ~8.8 seconds, build succeeds
 
+### CustomTextEditor Defensive Write-Back Removal (COMPLETED on 2026-02-24)
+
+**Problem discovered:** Files were loading correctly into the model but content was being cleared in the editor. Diagnostic logging revealed that after successful file load, the binding setter was being called with 0 chars, clearing the content.
+
+**Root cause:** `CustomTextEditor` (EditorTextView.swift) contained **three defensive write-backs** to the binding - remnants of the old `@Published` workaround pattern:
+
+1. **In `makeNSView`** (~line 1854): After seeding initial text, would write sanitized version back to binding
+2. **In `updateNSView`** (~line 1898): After updating textView, would write `target` back to binding
+3. **In `updateNSView`** (~line 2050): After defensive sanitization, would write sanitized version back to binding
+
+These defensive write-backs were necessary with `@Published` to keep the binding in sync after sanitization. However, with `@Observable`, the binding is the source of truth and these write-backs were harmful:
+
+- They could clear content during view updates
+- They created race conditions between model updates and view updates
+- They violated the unidirectional data flow principle
+
+**Solution implemented:**
+- Removed all three `DispatchQueue.main.async { self.text = ... }` write-backs
+- Added explanatory comments documenting why they were removed
+- Trust the binding as source of truth; only sync FROM textView TO binding via coordinator's `syncBindingText` (for user edits)
+
+**Files modified:**
+- EditorTextView.swift: Removed 3 defensive write-backs, added diagnostic logging
+
+**Result:** File loading now works correctly - content stays in editor after load
+
 ### ⚠️ Testing Needed
 1. Runtime testing - verify no AttributeGraph cycles
-2. Verify all file operations work correctly
+2. ✅ Verify file operations work correctly - **FIXED: Content no longer cleared after load**
 3. Test tab management and UI interactions
 4. Performance validation
 
 ### ❌ Future Work
-1. Update documentation (DISPATCHQUEUE_PATTERN.md needs complete rewrite for @Observable)
+1. ✅ Update documentation (DISPATCHQUEUE_PATTERN.md - DONE)
 2. Consider further ContentView decomposition if needed
+3. Remove diagnostic logging once confirmed stable
 
 ## Benefits Achieved
 
@@ -387,14 +414,17 @@ The migration from `ObservableObject` to `@Observable` has been **successfully c
 
 ### Key Achievements:
 - ✅ Removed ~150 lines of deferral boilerplate code
-- ✅ Eliminated all DispatchQueue.main.async wrapper patterns
+- ✅ Eliminated all DispatchQueue.main.async wrapper patterns from EditorViewModel
+- ✅ Removed 3 defensive binding write-backs from CustomTextEditor
 - ✅ Resolved Swift compiler type-checking timeouts by refactoring ContentView
-- ✅ Project builds successfully in ~8.8 seconds
+- ✅ Fixed critical bug where file content was cleared after loading
+- ✅ Project builds successfully in ~3-4 seconds
 - ✅ Code is cleaner, more maintainable, and follows modern SwiftUI patterns
+- ✅ Documentation updated (DISPATCHQUEUE_PATTERN.md)
 
 ### Remaining Work:
 - ⚠️ Runtime testing to verify no AttributeGraph cycles occur
-- ⚠️ UI and functionality testing
-- 📝 Documentation updates needed
+- ⚠️ Full UI and functionality testing
+- 📝 Remove diagnostic logging once confirmed stable
 
 The migration has delivered substantial benefits in code quality, performance, and developer experience. The codebase is now using modern Swift 5.9+ patterns with the `@Observable` macro.

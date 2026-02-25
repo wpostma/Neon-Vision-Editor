@@ -252,7 +252,6 @@ struct ContentView: View {
     @AppStorage("HasSeenWelcomeTourV1") var hasSeenWelcomeTourV1: Bool = false
     @AppStorage("WelcomeTourSeenRelease") var welcomeTourSeenRelease: String = ""
     @State var showWelcomeTour: Bool = false
-    @State private var hasCheckedWelcomeTour: Bool = false
 #if os(macOS)
     @State private var hostWindowNumber: Int? = nil
     @AppStorage("ShowBracketHelperBarMac") var showBracketHelperBarMac: Bool = false
@@ -1771,7 +1770,17 @@ struct ContentView: View {
                 }
 
                 applyStartupBehaviorIfNeeded()
-
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .dismissWelcomeTourRequested)) { _ in
+                showWelcomeTour = false
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleMarkdownPreviewRequested)) { notif in
+                guard matchesCurrentWindow(notif) else { return }
+                if currentLanguage == "markdown" {
+                    showMarkdownPreviewPane.toggle()
+                }
+            }
+            .onAppear {
                 // Keep iOS tab/editor layout stable by forcing Brain Dump off on mobile.
 #if os(iOS)
                 viewModel.isBrainDumpMode = false
@@ -1785,8 +1794,8 @@ struct ContentView: View {
                 applyWindowTranslucency(enableTranslucentWindow)
 
                 // Only check welcome tour once per session to avoid re-triggering on view updates
-                if !hasCheckedWelcomeTour {
-                    hasCheckedWelcomeTour = true
+                if !viewModel.hasCheckedWelcomeTourThisSession {
+                    viewModel.hasCheckedWelcomeTourThisSession = true
                     if !hasSeenWelcomeTourV1 || welcomeTourSeenRelease != WelcomeTourView.releaseID {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                             showWelcomeTour = true

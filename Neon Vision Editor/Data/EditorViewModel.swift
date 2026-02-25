@@ -382,6 +382,9 @@ final class EditorViewModel {
     var showFileOpenError: Bool = false
     var fileOpenErrorMessage: String = ""
     
+    // Session flag to prevent welcome tour from showing multiple times
+    var hasCheckedWelcomeTourThisSession: Bool = false
+    
     var selectedTab: TabData? {
         get { tabs.first(where: { $0.id == selectedTabID }) }
         set { selectedTabID = newValue?.id }
@@ -626,6 +629,14 @@ final class EditorViewModel {
 
     // Closes a tab while guaranteeing one tab remains open.
     func closeTab(tab: TabData) {
+        // Release security-scoped access if no other tabs use this file
+        if let url = tab.fileURL {
+            let stillInUse = tabs.contains { $0.id != tab.id && $0.fileURL == url }
+            if !stillInUse {
+                FileAccessManager.shared.releaseAccess(to: url)
+            }
+        }
+        
         // With @Observable, direct modifications are safe - no cycles!
         tabs.removeAll { $0.id == tab.id }
         if tabs.isEmpty {
@@ -639,12 +650,8 @@ final class EditorViewModel {
     func saveFile(tab: TabData) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
         if let url = tabs[index].fileURL {
-            let didStartScopedAccess = url.startAccessingSecurityScopedResource()
-            defer {
-                if didStartScopedAccess {
-                    url.stopAccessingSecurityScopedResource()
-                }
-            }
+            // Ensure we have security-scoped access (FileAccessManager maintains it for app lifetime)
+            FileAccessManager.shared.requestAccess(to: url)
             
             do {
                 AppLogger.shared.info("Saving file: \(url.lastPathComponent)", category: "Editor")
@@ -754,9 +761,12 @@ final class EditorViewModel {
             return 
         }
         
-        // Start security-scoped resource access for metadata check
-        let didStartScopedAccess = url.startAccessingSecurityScopedResource()
-        AppLogger.shared.info("Security-scoped access: \(didStartScopedAccess) for: \(url.lastPathComponent)", category: "Editor")
+        // Request persistent security-scoped access through FileAccessManager
+        // This keeps access alive for the app's lifetime, avoiding repeated start/stop calls
+        print("🔷 [OPEN-FILE] About to call FileAccessManager.requestAccess()")
+        let accessGranted = FileAccessManager.shared.requestAccess(to: url)
+        print("🔷 [OPEN-FILE] FileAccessManager.requestAccess() returned: \(accessGranted)")
+        AppLogger.shared.info("Requested file access for: \(url.lastPathComponent)", category: "Editor")
         
         let extLangHint = LanguageDetector.shared.preferredLanguage(for: url) ?? languageMap[url.pathExtension.lowercased()]
         let fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
@@ -789,18 +799,18 @@ final class EditorViewModel {
         let tabID = placeholderTab.id  // Capture ID before async operations
         let startTime = Date()  // Track load time
         // Capture security-scoped access state to maintain it in detached task
-        Task.detached(priority: .userInitiated) { [url, extLangHint, tabID, isLargeCandidate, didStartScopedAccess, startTime] in
+        Task.detached(priority: .userInitiated) { [url, extLangHint, tabID, isLargeCandidate, startTime] in
+            print("🔷 [FILE-READ] Detached task started for: \(url.lastPathComponent)")
             AppLogger.shared.info("Detached task started for reading: \(url.lastPathComponent)", category: "Editor")
-            // Maintain security-scoped access for the duration of file loading
-            defer {
-                if didStartScopedAccess {
-                    url.stopAccessingSecurityScopedResource()
-                }
-            }
+            // Security-scoped access is now managed by FileAccessManager for the app's lifetime
             do {
+                print("🔷 [FILE-READ] About to read file data for: \(url.lastPathComponent)")
+                print("🔷 [FILE-READ] - URL path: \(url.path)")
+                print("🔷 [FILE-READ] - isLargeCandidate: \(isLargeCandidate)")
                 AppLogger.shared.info("Reading file data for: \(url.lastPathComponent)", category: "Editor")
                 let data: Data
                 if isLargeCandidate {
+                    print("🔷 [FILE-READ] Using streaming load for large file")
                     data = try EditorLoadHelper.streamFileData(from: url) { previewData in
                         let previewRaw = String(decoding: previewData, as: UTF8.self)
                         let preview = EditorLoadHelper.sanitizeTextForFileLoad(previewRaw, useFastPath: true)
@@ -811,8 +821,10 @@ final class EditorViewModel {
                         }
                     }
                 } else {
+                    print("🔷 [FILE-READ] Using direct load: Data(contentsOf:)")
                     data = try Data(contentsOf: url, options: [.mappedIfSafe])
                 }
+                print("🔷 [FILE-READ] ✅ Successfully read \(data.count) bytes")
                 AppLogger.shared.info("File data read successfully, size: \(data.count) bytes for: \(url.lastPathComponent)", category: "Editor")
                 let raw = String(decoding: data, as: UTF8.self)
                 let content = EditorLoadHelper.sanitizeTextForFileLoad(
@@ -852,6 +864,9 @@ final class EditorViewModel {
                     }
                 }
             } catch {
+                print("🔷 [FILE-READ] ❌ ERROR reading file: \(url.lastPathComponent)")
+                print("🔷 [FILE-READ] ❌ Error: \(error.localizedDescription)")
+                print("🔷 [FILE-READ] ❌ Full error: \(error)")
                 AppLogger.shared.error("Failed to read file: \(url.lastPathComponent) - \(error.localizedDescription)", category: "Editor")
                 await MainActor.run {
                     // Remove the failed tab to prevent saving empty content

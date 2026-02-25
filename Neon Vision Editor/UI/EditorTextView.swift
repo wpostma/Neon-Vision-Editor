@@ -1885,8 +1885,14 @@ struct CustomTextEditor: NSViewRepresentable {
             print("🔵 [UPDATE-NSVIEW] text.count=\(text.count), target.count=\(target.count), textView.string.count=\(textView.string.count), isTabLoadingContent=\(isTabLoadingContent)")
             if textView.string != target {
                 let hasFocus = (textView.window?.firstResponder as? NSTextView) === textView
-                let shouldPreferEditorBuffer = hasFocus && !isTabLoadingContent
-                print("🔵 [UPDATE-NSVIEW] Mismatch detected: hasFocus=\(hasFocus), shouldPreferEditorBuffer=\(shouldPreferEditorBuffer)")
+                let textViewIsEmpty = textView.string.isEmpty
+                let bindingHasContent = !text.isEmpty
+                // Only prefer editor buffer if it has focus, isn't loading, AND either:
+                // - Both are non-empty (user made edits)
+                // - OR textView has content but binding doesn't (edge case)
+                // Don't prefer empty textView over non-empty binding!
+                let shouldPreferEditorBuffer = hasFocus && !isTabLoadingContent && !textViewIsEmpty
+                print("🔵 [UPDATE-NSVIEW] Mismatch detected: hasFocus=\(hasFocus), textViewIsEmpty=\(textViewIsEmpty), bindingHasContent=\(bindingHasContent), shouldPreferEditorBuffer=\(shouldPreferEditorBuffer)")
                 if shouldPreferEditorBuffer {
                     print("🟢 [UPDATE-NSVIEW] Preferring editor buffer, syncing textView.string (\(textView.string.count) chars) to binding")
                     context.coordinator.syncBindingTextImmediately(textView.string)

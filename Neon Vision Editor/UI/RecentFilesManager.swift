@@ -159,6 +159,10 @@ final class RecentFilesManager: ObservableObject {
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             ) {
+                print("🔷 [RecentFiles] Resolved bookmark for: \(url.lastPathComponent)")
+                // CRITICAL: Request persistent security-scoped access through FileAccessManager
+                // This maintains access for the app's lifetime, allowing files to be opened from Recent Files
+                FileAccessManager.shared.requestAccess(to: url)
                 urls.append(url)
             }
         }
