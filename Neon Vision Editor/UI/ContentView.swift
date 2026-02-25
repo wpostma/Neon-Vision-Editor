@@ -127,13 +127,9 @@ struct ContentView: View {
 #endif
 
     // Environment-provided view model and theme/error bindings
-    @Environment(EditorViewModel.self) private var _viewModel: EditorViewModel
+    @Environment(EditorViewModel.self) var viewModel: EditorViewModel
     @EnvironmentObject private var supportPurchaseManager: SupportPurchaseManager
     @EnvironmentObject var appUpdateManager: AppUpdateManager
-    
-    private var viewModel: EditorViewModel {
-        _viewModel
-    }
     @Environment(\.colorScheme) var colorScheme
 #if os(iOS)
     @Environment(\.horizontalSizeClass) var horizontalSizeClass
@@ -1626,8 +1622,6 @@ struct ContentView: View {
 
     // Layout: NavigationSplitView with optional sidebar and the primary code editor.
     var body: some View {
-        @Bindable var vm = _viewModel
-        
         platformLayout
         .overlay(alignment: .topTrailing) {
             if showFindReplace {
@@ -1666,7 +1660,10 @@ struct ContentView: View {
         } message: {
             Text(whitespaceInspectorMessage ?? "")
         }
-        .alert("File Open Error", isPresented: $vm.showFileOpenError) {
+        .alert("File Open Error", isPresented: Binding(
+            get: { viewModel.showFileOpenError },
+            set: { viewModel.showFileOpenError = $0 }
+        )) {
             Button("OK", role: .cancel) { }
         } message: {
             Text(viewModel.fileOpenErrorMessage)
@@ -1735,7 +1732,7 @@ struct ContentView: View {
         .onChange(of: viewModel.isLineWrapEnabled) { _, _ in
             scheduleHighlightRefresh()
         }
-        .onReceive(viewModel.$tabs) { _ in
+        .onChange(of: viewModel.tabs) { _, _ in
             persistSessionIfReady()
 #if os(iOS)
             persistUnsavedDraftSnapshotIfNeeded()
@@ -1809,7 +1806,7 @@ struct ContentView: View {
         }
 #endif
     }
-
+    
     private func scheduleHighlightRefresh(delay: TimeInterval = 0.05) {
         pendingHighlightRefresh?.cancel()
         let work = DispatchWorkItem {

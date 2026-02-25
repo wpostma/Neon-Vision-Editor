@@ -8,7 +8,7 @@ import UIKit
 
 // EDITOR VIEW MODEL  1.0
 //   @Observable edition. (abandoning ObservableObject protocol)
-//   Streamed loading.
+//   Streamed loading (EditorLoadHelper)
 //   Spanning/efficient piece table storage.
 //   Avoid model/view cycles (SwiftUI undefined behaviour issues)
 //   Avoid race conditions
@@ -311,6 +311,9 @@ final class PieceTableDocument {
 
 ///MARK: - Tab Model
 // Represents one editor tab and its mutable editing state.
+// TODO This probably should be a class that manages the data in here, because setting content should cause the dirty flag to set
+// TODO Also another state "notLoaded" is probably needed, and if notLoaded is true, then isDirty can't matter.
+// TODO why bother with a piecetabledocument if we get and set it as a string?
 struct TabData: Identifiable {
     let id = UUID()
     var name: String
