@@ -6,6 +6,15 @@ import OSLog
 import UIKit
 #endif
 
+// EDITOR VIEW MODEL  1.0
+//   @Observable edition. (abandoning ObservableObject protocol)
+//   Streamed loading.
+//   Spanning/efficient piece table storage.
+//   Avoid model/view cycles (SwiftUI undefined behaviour issues)
+//   Avoid race conditions
+// see:
+// https://developer.apple.com/documentation/SwiftUI/Migrating-from-the-observable-object-protocol-to-the-observable-macro
+
 ///MARK: - Text Sanitization
 // Normalizes pasted and loaded text before it reaches editor state.
 enum EditorTextSanitizer {

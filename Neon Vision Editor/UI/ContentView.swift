@@ -127,9 +127,13 @@ struct ContentView: View {
 #endif
 
     // Environment-provided view model and theme/error bindings
-    @Environment(EditorViewModel.self) var viewModel: EditorViewModel
+    @Environment(EditorViewModel.self) private var _viewModel: EditorViewModel
     @EnvironmentObject private var supportPurchaseManager: SupportPurchaseManager
     @EnvironmentObject var appUpdateManager: AppUpdateManager
+    
+    private var viewModel: EditorViewModel {
+        _viewModel
+    }
     @Environment(\.colorScheme) var colorScheme
 #if os(iOS)
     @Environment(\.horizontalSizeClass) var horizontalSizeClass
@@ -1622,9 +1626,9 @@ struct ContentView: View {
 
     // Layout: NavigationSplitView with optional sidebar and the primary code editor.
     var body: some View {
-        @Bindable var vm = viewModel
+        @Bindable var vm = _viewModel
         
-        AnyView(platformLayout)
+        platformLayout
         .overlay(alignment: .topTrailing) {
             if showFindReplace {
                 FindReplacePanel(
