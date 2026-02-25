@@ -61,11 +61,69 @@ SwiftUI's rendering process:
 
 ## Solution: DispatchQueue + Task Pattern
 
-### The Complete Fix (Two Locations)
+### The Complete Fix (Multiple Locations)
+
+#### CRITICAL Fix: Defer Content Application (applyLoadedContent)
+
+**Most Important Discovery (2026-02-24):** Even with all placeholder tab creation properly deferred, AttributeGraph cycles persisted because `applyLoadedContent()` was directly modifying `@Published` properties from within a nested `MainActor.run` + `Task { @MainActor }` context.
+
+**The Problem:**
+```swift
+// In openFile(url:) after loading file data:
+await MainActor.run {
+    Task { @MainActor in
+        await self.applyLoadedContent(...)  // ← Still in view update context!
+    }
+}
+
+// Inside applyLoadedContent():
+@MainActor
+private func applyLoadedContent(...) async {
+    tabs[index].content = content           // ← Direct modification = cycle!
+    tabs[index].language = language
+    tabs[index].isLoadingContent = false
+}
+```
+
+**Why it failed:** Even though we were using `MainActor.run` to get onto the main actor, the nested `Task { @MainActor }` was still executing in a context where SwiftUI might be in a view update cycle. The direct modifications to `tabs[index]` properties triggered AttributeGraph cycles.
+
+**Symptoms:**
+- Files would load (logs confirmed content was read)
+- Properties would be set (traces showed assignments executing)
+- But UI displayed empty tabs
+- AttributeGraph cycle warnings in console
+- No errors, just silent failure to display
+
+**The Solution:**
+Wrap ALL @Published property modifications inside `applyLoadedContent()` with `DispatchQueue.main.async` using `withCheckedContinuation` for async/await compatibility:
+
+```swift
+@MainActor
+private func applyLoadedContent(...) async {
+    // Defer ALL @Published property modifications to avoid AttributeGraph cycles
+    await withCheckedContinuation { continuation in
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else {
+                continuation.resume()
+                return
+            }
+
+            // NOW it's safe to modify @Published properties
+            self.tabs[index].language = language
+            self.tabs[index].content = content
+            self.tabs[index].isLoadingContent = false
+
+            continuation.resume()
+        }
+    }
+}
+```
+
+**Key Insight:** You need to defer modifications EVEN WHEN you think you're already on MainActor. The issue isn't thread safety - it's SwiftUI's view update cycle timing.
 
 #### Fix 1: Defer Placeholder Tab Creation
 
-The primary fix - wrap initial tab creation in `DispatchQueue.main.async`:
+Wrap initial tab creation in `DispatchQueue.main.async`:
 
 ```swift
 // BROKEN - Direct modification during menu action
@@ -162,23 +220,27 @@ DispatchQueue.main.async { [weak self] in
 
 **Why it matters:** This is called from menu actions during SwiftUI rendering.
 
-### Location 2: Content Loading (SECONDARY FIX)
+### Location 2: Content Loading (IMPORTANT: NO DEFERRAL)
 
 **File:** `EditorViewModel.swift`
 **Method:** `openFile(url:)` → `Task.detached` → content update
-**Issue:** Async updates might execute during subsequent view updates
+**Issue:** Initially had DispatchQueue deferral, but this caused **race conditions and empty tabs**
 
 ```swift
-// Line ~800 - Defensive fix
-DispatchQueue.main.async { [weak self] in
-    guard let self = self else { return }
+// Line ~836 - CORRECT: Use MainActor.run without DispatchQueue deferral
+await MainActor.run { [startTime] in
     Task { @MainActor in
         await self.applyLoadedContent(...)
     }
 }
 ```
 
-**Why it matters:** Prevents cycles if user interacts with UI while file loads.
+**Why no DispatchQueue here?** Because we're coming from background `Task.detached`, not from a UI action. Using `DispatchQueue.main.async` here would create a double-deferral race condition:
+1. Placeholder tab deferred via DispatchQueue (Location 1)
+2. Content loading deferred via DispatchQueue (this location)
+3. **Race**: Tab renders empty before content arrives
+
+**Solution**: Use `MainActor.run` to execute immediately on main actor without runloop deferral.
 
 ### Location 3: Tab Content Updates (CRITICAL FIX)
 
@@ -209,6 +271,53 @@ func updateTabContent(tab: TabData, content: String) {
 ```
 
 **Why it matters:** This method is called from text editor bindings during SwiftUI's view update cycle. When the user types, the binding's `set` closure executes during rendering. Without the DispatchQueue wrapper, this causes "Publishing changes from within view updates" errors. The ~16ms delay (one frame) is imperceptible but prevents AttributeGraph cycles.
+
+### Location 4-6: Tab Management Methods (ADDITIONAL FIXES)
+
+**File:** `EditorViewModel.swift`
+**Methods:** `addNewTab()`, `closeTab(tab:)`, `focusTabIfOpen(for:)`
+**Issue:** Direct synchronous modification of `tabs` and `selectedTabID` when called from menu/toolbar actions
+
+These methods also needed the same fix:
+
+```swift
+// addNewTab() - Line ~446
+func addNewTab() {
+    let newTab = TabData(name: "Untitled \(tabs.count + 1)", ...)
+    DispatchQueue.main.async { [weak self] in
+        guard let self = self else { return }
+        self.tabs.append(newTab)
+        self.selectedTabID = newTab.id
+    }
+}
+
+// closeTab(tab:) - Line ~620
+func closeTab(tab: TabData) {
+    DispatchQueue.main.async { [weak self] in
+        guard let self = self else { return }
+        self.tabs.removeAll { $0.id == tab.id }
+        if self.tabs.isEmpty {
+            self.addNewTab()
+        } else if self.selectedTabID == tab.id {
+            self.selectedTabID = self.tabs.first?.id
+        }
+    }
+}
+
+// focusTabIfOpen(for:) - Line ~1013
+func focusTabIfOpen(for url: URL) -> Bool {
+    if let existingIndex = indexOfOpenTab(for: url) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.selectedTabID = self.tabs[existingIndex].id
+        }
+        return true
+    }
+    return false
+}
+```
+
+**Why these matter:** All three are called from menu actions (File → New Tab, File → Close Tab, File → Open Recent when file already open). Without deferral, they caused the same AttributeGraph cycles.
 
 ## When to Use This Pattern
 
@@ -244,12 +353,68 @@ func updateTabContent(tab: TabData, content: String) {
 2. **View model initialization**
    ```swift
    init() {
-       // Safe - not during any view update
+       // Safe - not during any view update, use direct modifications
        self.tabs = []
+       // or call immediate helper methods
+       self.addNewTabImmediate(initialTab)
    }
    ```
 
 3. **Changes triggered by timers/notifications (if not during rendering)**
+
+## ⚠️ Critical: Avoid Double Deferral
+
+**Problem:** If a deferred method calls another deferred method, you create double deferral:
+
+```swift
+// WRONG - Double deferral!
+func closeTab(tab: TabData) {
+    DispatchQueue.main.async { [weak self] in
+        guard let self = self else { return }
+        self.tabs.removeAll { $0.id == tab.id }
+        if self.tabs.isEmpty {
+            self.addNewTab()  // ← This defers AGAIN!
+        }
+    }
+}
+
+func addNewTab() {
+    DispatchQueue.main.async { [weak self] in  // ← Second deferral!
+        // ...
+    }
+}
+```
+
+**Solution:** Create immediate (non-deferred) helper methods for internal use:
+
+```swift
+// Public API - defers for UI safety
+func addNewTab() {
+    let newTab = TabData(...)
+    DispatchQueue.main.async { [weak self] in
+        guard let self = self else { return }
+        self.addNewTabImmediate(newTab)
+    }
+}
+
+// Internal helper - no deferral
+private func addNewTabImmediate(_ newTab: TabData) {
+    tabs.append(newTab)
+    selectedTabID = newTab.id
+}
+
+// Now closeTab can call the immediate version
+func closeTab(tab: TabData) {
+    DispatchQueue.main.async { [weak self] in
+        guard let self = self else { return }
+        self.tabs.removeAll { $0.id == tab.id }
+        if self.tabs.isEmpty {
+            let newTab = TabData(...)
+            self.addNewTabImmediate(newTab)  // ← Direct, no double deferral!
+        }
+    }
+}
+```
 
 ## Diagnostic Logging Strategy
 
@@ -388,6 +553,60 @@ func openFile(url: URL) {
 }
 ```
 
+## Critical Race Condition Fix (2024-02-24)
+
+### The Empty Tab Problem
+
+After implementing DispatchQueue deferral for `updateTabContent`, a new issue emerged:
+- Files would sometimes open with **empty tabs**
+- Navigating away and back would show the content
+- This was a **race condition** caused by double deferral
+
+### Root Cause
+
+The file loading flow had TWO DispatchQueue deferrals:
+1. **Placeholder tab creation** (Location 1): `DispatchQueue.main.async` → correct, needed to avoid cycles
+2. **Content loading** (Location 2): `DispatchQueue.main.async` → **WRONG**, caused race condition
+
+**Timeline of the bug:**
+```
+T+0ms:   Menu action → openFile()
+T+0ms:   DispatchQueue.main.async { create placeholder tab } [scheduled for T+16ms]
+T+5ms:   Task.detached starts background file loading
+T+10ms:  File loaded, content ready
+T+10ms:  DispatchQueue.main.async { apply content } [scheduled for T+26ms]
+T+16ms:  Placeholder tab created, tab renders EMPTY
+T+20ms:  User sees empty tab (content not yet applied!)
+T+26ms:  Content applied (too late, user already confused)
+```
+
+### The Fix
+
+**Remove** the `DispatchQueue.main.async` wrapper from content loading and use `MainActor.run` instead:
+
+```swift
+// WRONG - causes race condition
+DispatchQueue.main.async { [weak self, startTime] in
+    guard let self = self else { return }
+    Task { @MainActor in
+        await self.applyLoadedContent(...)
+    }
+}
+
+// CORRECT - immediate execution on main actor
+await MainActor.run { [startTime] in
+    Task { @MainActor in
+        await self.applyLoadedContent(...)
+    }
+}
+```
+
+**Why this works:**
+- `MainActor.run` executes **immediately** when the main actor is available
+- No runloop deferral, so content arrives as soon as file loads
+- Placeholder tab and content application happen in quick succession
+- No visible empty tab state
+
 ## Testing
 
 To verify the fix works:
@@ -395,6 +614,7 @@ To verify the fix works:
 1. **Open Recent menu** - rapidly click multiple files
    - ✅ Should open without errors
    - ✅ Console shows no AttributeGraph cycles
+   - ✅ **No empty tabs** - content should appear immediately
 
 2. **Check trace logs** - look for pattern:
    ```

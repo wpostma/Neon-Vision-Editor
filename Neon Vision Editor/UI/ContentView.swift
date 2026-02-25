@@ -252,6 +252,7 @@ struct ContentView: View {
     @AppStorage("HasSeenWelcomeTourV1") var hasSeenWelcomeTourV1: Bool = false
     @AppStorage("WelcomeTourSeenRelease") var welcomeTourSeenRelease: String = ""
     @State var showWelcomeTour: Bool = false
+    @State private var hasCheckedWelcomeTour: Bool = false
 #if os(macOS)
     @State private var hostWindowNumber: Int? = nil
     @AppStorage("ShowBracketHelperBarMac") var showBracketHelperBarMac: Bool = false
@@ -1765,9 +1766,14 @@ struct ContentView: View {
 #endif
 
             applyWindowTranslucency(enableTranslucentWindow)
-            if !hasSeenWelcomeTourV1 || welcomeTourSeenRelease != WelcomeTourView.releaseID {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    showWelcomeTour = true
+
+            // Only check welcome tour once per session to avoid re-triggering on view updates
+            if !hasCheckedWelcomeTour {
+                hasCheckedWelcomeTour = true
+                if !hasSeenWelcomeTourV1 || welcomeTourSeenRelease != WelcomeTourView.releaseID {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        showWelcomeTour = true
+                    }
                 }
             }
         }
@@ -2017,9 +2023,10 @@ struct ContentView: View {
             if !urls.isEmpty {
                 // Delay file restoration to allow security-scoped bookmarks to be fully resolved
                 // and app initialization to complete. This prevents permission errors at startup.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak viewModel] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak viewModel] in
                     guard let viewModel = viewModel else { return }
 
+                    // Clear default "Untitled 1" tab and open session files
                     viewModel.tabs.removeAll()
                     viewModel.selectedTabID = nil
 
@@ -2027,12 +2034,17 @@ struct ContentView: View {
                         viewModel.openFile(url: url)
                     }
 
-                    if let selectedURL {
-                        _ = viewModel.focusTabIfOpen(for: selectedURL)
-                    }
+                    // Give openFile calls time to create tabs via their own deferrals
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak viewModel] in
+                        guard let viewModel = viewModel else { return }
 
-                    if viewModel.tabs.isEmpty {
-                        viewModel.addNewTab()
+                        if let selectedURL {
+                            _ = viewModel.focusTabIfOpen(for: selectedURL)
+                        }
+
+                        if viewModel.tabs.isEmpty {
+                            viewModel.addNewTab()
+                        }
                     }
                 }
             }

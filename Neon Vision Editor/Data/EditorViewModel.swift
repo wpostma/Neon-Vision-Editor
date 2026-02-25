@@ -1,5 +1,4 @@
 import SwiftUI
-import Combine
 import UniformTypeIdentifiers
 import Foundation
 import OSLog
@@ -355,17 +354,18 @@ struct TabData: Identifiable {
 ///MARK: - Editor View Model
 // Owns tab lifecycle, file IO, and language-detection behavior.
 @MainActor
-class EditorViewModel: ObservableObject {
+@Observable
+final class EditorViewModel {
     private static let saveSignposter = OSSignposter(subsystem: "h3p.Neon-Vision-Editor", category: "FileIO")
-    @Published var tabs: [TabData] = []
-    @Published var selectedTabID: UUID?
-    @Published var showSidebar: Bool = true
-    @Published var isBrainDumpMode: Bool = false
-    @Published var showingRename: Bool = false
-    @Published var renameText: String = ""
-    @Published var isLineWrapEnabled: Bool = true
-    @Published var showFileOpenError: Bool = false
-    @Published var fileOpenErrorMessage: String = ""
+    var tabs: [TabData] = []
+    var selectedTabID: UUID?
+    var showSidebar: Bool = true
+    var isBrainDumpMode: Bool = false
+    var showingRename: Bool = false
+    var renameText: String = ""
+    var isLineWrapEnabled: Bool = true
+    var showFileOpenError: Bool = false
+    var fileOpenErrorMessage: String = ""
     
     var selectedTab: TabData? {
         get { tabs.first(where: { $0.id == selectedTabID }) }
@@ -439,25 +439,17 @@ class EditorViewModel: ObservableObject {
     ]
 
     init() {
-        // During init, we're not in a view update cycle, so use immediate version
         let initialTab = TabData(name: "Untitled 1", content: "", language: defaultNewTabLanguage(), fileURL: nil, languageLocked: false)
-        addNewTabImmediate(initialTab)
+        tabs.append(initialTab)
+        selectedTabID = initialTab.id
     }
 
     // Creates and selects a new untitled tab.
     func addNewTab() {
         // Keep language discovery active for new untitled tabs.
         let newTab = TabData(name: "Untitled \(tabs.count + 1)", content: "", language: defaultNewTabLanguage(), fileURL: nil, languageLocked: false)
-
-        // Defer @Published modifications to avoid cycles when called from menu/toolbar actions
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.addNewTabImmediate(newTab)
-        }
-    }
-
-    // Internal: Adds a new tab immediately without deferral (for use within already-deferred contexts)
-    private func addNewTabImmediate(_ newTab: TabData) {
+        
+        // With @Observable, direct modifications are safe - no cycles!
         tabs.append(newTab)
         selectedTabID = newTab.id
     }
@@ -471,13 +463,8 @@ class EditorViewModel: ObservableObject {
 
     // Updates tab text and applies language detection/locking heuristics.
     func updateTabContent(tab: TabData, content: String) {
-        // Defer all @Published property modifications to avoid "Publishing changes from within view updates"
-        // This is critical when called from menu actions, text editor bindings, or other UI callbacks
-        // that may execute during SwiftUI's rendering cycle.
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            
-            if let index = self.tabs.firstIndex(where: { $0.id == tab.id }) {
+        // With @Observable, direct modifications are safe - no cycles!
+        if let index = self.tabs.firstIndex(where: { $0.id == tab.id }) {
                 if self.tabs[index].isLoadingContent {
                     // During staged file load, content updates are system-driven; do not mark dirty
                     // and do not run language detection on partial content.
