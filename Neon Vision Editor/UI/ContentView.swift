@@ -1622,6 +1622,8 @@ struct ContentView: View {
 
     // Layout: NavigationSplitView with optional sidebar and the primary code editor.
     var body: some View {
+        @Bindable var vm = viewModel
+        
         AnyView(platformLayout)
         .overlay(alignment: .topTrailing) {
             if showFindReplace {
@@ -1660,7 +1662,7 @@ struct ContentView: View {
         } message: {
             Text(whitespaceInspectorMessage ?? "")
         }
-        .alert("File Open Error", isPresented: $viewModel.showFileOpenError) {
+        .alert("File Open Error", isPresented: $vm.showFileOpenError) {
             Button("OK", role: .cancel) { }
         } message: {
             Text(viewModel.fileOpenErrorMessage)
@@ -2845,7 +2847,10 @@ struct ContentView: View {
                     language: currentLanguage,
                     colorScheme: colorScheme,
                     fontSize: editorFontSize,
-                    isLineWrapEnabled: $viewModel.isLineWrapEnabled,
+                    isLineWrapEnabled: Binding(
+                        get: { viewModel.isLineWrapEnabled },
+                        set: { viewModel.isLineWrapEnabled = $0 }
+                    ),
                     isLargeFileMode: largeFileModeEnabled,
                     translucentBackgroundEnabled: enableTranslucentWindow,
                     showKeyboardAccessoryBar: {
