@@ -711,6 +711,28 @@ final class AcceptingTextView: NSTextView {
         }
         return didBecome
     }
+    
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event) ?? NSMenu()
+        
+        // Add markdown preview toggle if we're in a markdown file
+        if emmetLanguage == "markdown" {
+            let markdownItem = NSMenuItem(
+                title: "Toggle Markdown Preview",
+                action: #selector(toggleMarkdownPreview),
+                keyEquivalent: ""
+            )
+            markdownItem.target = self
+            menu.insertItem(markdownItem, at: 0)
+            menu.insertItem(NSMenuItem.separator(), at: 1)
+        }
+        
+        return menu
+    }
+    
+    @objc private func toggleMarkdownPreview() {
+        NotificationCenter.default.post(name: .toggleMarkdownPreviewRequested, object: nil)
+    }
 
     override func layout() {
         super.layout()
